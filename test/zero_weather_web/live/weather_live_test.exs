@@ -145,7 +145,7 @@ defmodule ZeroWeatherWeb.WeatherLiveTest do
     assert html =~ "Rain countdown"
     assert html =~ "5-minute point forecast, interpolated to 1 minute"
     assert html =~ "Our own nowcast is unavailable right now: no radar images available."
-    refute html =~ "Our own nowcast"
+    refute html =~ "radar frames tracked and advected"
     assert html =~ "Dry for the next 2 hours"
   end
 
