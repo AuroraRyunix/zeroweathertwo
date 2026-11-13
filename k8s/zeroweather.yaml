@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zeroweather
+  namespace: default
+  labels:
+    app: zeroweather
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: zeroweather
+  template:
+    metadata:
+      labels:
+        app: zeroweather
+    spec:
+      containers:
+        - name: zeroweather
+          image: ghcr.io/auroraryunix/zeroweathertwo:latest # Or your local registry
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4000
+              name: http
+          env:
+            - name: PORT
+              value: "4000"
+            - name: PHX_SERVER
+              value: "true"
+            - name: PHX_HOST
+              value: "zeroweather.local"
+            - name: SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: zeroweather-secrets
+                  key: secret-key-base
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 4000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zeroweather-service
+  namespace: default
+  labels:
+    app: zeroweather
+spec:
+  type: LoadBalancer # Tanzu will assign an NSX / Avi / MetalLB VIP automatically
+  selector:
+    app: zeroweather
+  ports:
+    - name: http
+      port: 80
+      targetPort: 4000
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: zeroweather-secrets
+  namespace: default
+type: Opaque
+stringData:
+  secret-key-base: "5mQk7k7vY5rWbV2L6qR3x8mN9pP1sT4uX7yZ0aC3dE6fG9hI2jK5lM8nO1pQ4rS7"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zeroweather-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: contour # Standard Tanzu ingress or change to nginx
+spec:
+  rules:
+    - host: zeroweather.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: zeroweather-service
+                port:
+                  number: 80

@@ -80,7 +80,27 @@ Open [http://localhost:4000](http://localhost:4000) in your browser.
 
 ---
 
-## 🐳 Deploying on VMware Photon OS / Docker
+## ☸️ Deploying on VMware Tanzu (TKG / Kubernetes)
+
+Because ZeroWeather is completely stateless and has zero database dependencies, it is a perfect workload for Tanzu:
+
+- **Resource footprint:** `50m` CPU / `64Mi` memory per replica.
+- **High Availability:** 2 replicas scheduled across your vSphere worker nodes.
+- **Probes:** Pre-configured liveness and readiness probes on `/api/v1/health`.
+- **Automatic Builds:** Pushing to `main` triggers GitHub Actions to build and publish the image to GitHub Packages (`ghcr.io/auroraryunix/zeroweathertwo:latest`).
+
+### Deploy to Tanzu:
+```bash
+# Switch to your Tanzu Guest Cluster context
+kubectl apply -f k8s/zeroweather.yaml
+
+# Watch the rollout
+kubectl get pods -l app=zeroweather -w
+```
+
+---
+
+## 🐳 Deploying with Docker / Photon OS
 
 The project includes an ultra-lean multi-stage `Dockerfile` and `docker-compose.yml`:
 
