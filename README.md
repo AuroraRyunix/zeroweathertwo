@@ -1,0 +1,162 @@
+# ⚡ ZeroWeather Belgium
+
+A high-performance, real-time meteorological nowcasting and radar web application built for Belgium (with dedicated presets for **Ghent**, **Brussels**, Antwerp, Liège, Bruges, and arbitrary GPS coordinates).
+
+Written in **100% Elixir & Phoenix LiveView**, running on **Bandit**, with an in-memory ETS cache and zero database dependencies. Ideal for lightweight deployment on **VMware vSphere** and **VMware Photon OS**.
+
+---
+
+## 🌟 Key Features
+
+- **⏱️ 15-Minute Rain Nowcast Timeline:**
+  - High-resolution precipitation forecasts in 15-minute intervals for the next 3 hours.
+  - Custom SVG rain bar chart with intensity color coding (Light $<1$ mm/h, Moderate $1-4$ mm/h, Heavy $>4$ mm/h).
+  - Rain probability tags and intelligent human-readable summary (*e.g., "Rain starting in ~15 min (peak ~2.4 mm/h at 11:30)"*).
+- **📡 Real-Time Live Radar Composite:**
+  - Doppler radar composite covering Belgium and cross-border approaches (Northern France, southern North Sea, Netherlands).
+  - Timeline scrubber from **Past (-60m)** to **Live** to **Nowcast (+30m)**.
+  - Interactive Leaflet.js animation with play/pause loop.
+- **📍 Instant Presets & Browser Geolocation:**
+  - Quick-switch pills for Ghent, Brussels, Antwerp, Bruges, Liège, Namur, Leuven, Hasselt, Mons, and Ostend.
+  - **My GPS** button for one-click HTML5 geolocation anywhere in Belgium.
+- **🍃 Live Air Quality & Atmospheric Metrics:**
+  - European Air Quality Index (EAQI) + $\text{PM}_{2.5}$, $\text{PM}_{10}$, $\text{NO}_2$, and $\text{O}_3$ metrics.
+  - Surface barometric pressure, elevation, wind speed & direction.
+- **⚡ Sub-Millisecond In-Memory Caching:**
+  - In-memory ETS cache (`ZeroWeather.Cache`) with rolling TTLs. No external Redis needed.
+- **🚀 Pure Elixir Architecture:**
+  - LiveView updates seamlessly over WebSockets.
+  - No bloated client-side frameworks—pure server-rendered interactive UI.
+
+---
+
+## 🏗️ Architecture
+
+```
+                       [ Upstream Data Streams ]
+                                  │
+         ┌────────────────────────┼────────────────────────┐
+         ▼                        ▼                        ▼
+ [ RainViewer Radar ]     [ Open-Meteo / DWD ]     [ Copernicus EAQI ]
+  (5-10m tiles + nowcast)  (15m rain & wind)       (PM2.5, PM10, NO2)
+         │                        │                        │
+         └────────────────────────┼────────────────────────┘
+                                  │
+                                  ▼
+                   ┌──────────────────────────────┐
+                   │   ZeroWeather.Cache (ETS)    │
+                   │   Rolling in-memory buffer   │
+                   └──────────────┬───────────────┘
+                                  │
+         ┌────────────────────────┴────────────────────────┐
+         ▼                                                 ▼
+ [ Phoenix LiveView ]                             [ REST API v1 ]
+  • Reactive SVG rain chart                        • GET /api/v1/nowcast
+  • Interactive Leaflet radar map                  • GET /api/v1/radar
+  • Auto-refresh every 3 min                       • GET /api/v1/locations
+```
+
+---
+
+## 🚀 Getting Started Locally
+
+### Prerequisites
+- Elixir 1.17+ and Erlang/OTP 27+
+
+### Setup & Run
+```bash
+# 1. Clone the repository
+git clone https://github.com/AuroraRyunix/zeroweathertwo.git
+cd zeroweathertwo
+
+# 2. Install dependencies & build assets
+mix setup
+
+# 3. Start the Phoenix server
+mix phx.server
+```
+
+Open [http://localhost:4000](http://localhost:4000) in your browser.
+
+---
+
+## 🐳 Deploying on VMware Photon OS / Docker
+
+The project includes an ultra-lean multi-stage `Dockerfile` and `docker-compose.yml`:
+
+```bash
+# Build and run container
+docker compose up -d
+
+# Check health
+curl http://localhost:4000/api/v1/health
+```
+
+The compiled release container consumes only **~40–50 MB of RAM** and requires no external database.
+
+---
+
+## 🔌 REST API Endpoints
+
+### 1. Point Nowcast
+```bash
+GET /api/v1/nowcast?lat=51.0543&lon=3.7174
+```
+**Response:**
+```json
+{
+  "lat": 51.0543,
+  "lon": 3.7174,
+  "elevation": 12.0,
+  "current": {
+    "temperature": 12.4,
+    "humidity": 76,
+    "precipitation": 0.0,
+    "wind_speed": 18.2,
+    "wind_direction": 220,
+    "condition_text": "Partly cloudy",
+    "condition_icon": "⛅"
+  },
+  "summary": "Dry: No rain expected in the next 3 hours.",
+  "timeline": [
+    { "time": "11:15", "precip_mm": 0.0, "probability": 0, "intensity_label": "dry" },
+    { "time": "11:30", "precip_mm": 0.2, "probability": 25, "intensity_label": "light" },
+    { "time": "11:45", "precip_mm": 1.4, "probability": 60, "intensity_label": "moderate" }
+  ],
+  "air_quality": {
+    "eaqi": 42,
+    "label": "Moderate",
+    "pm2_5": 8.4,
+    "pm10": 18.2
+  }
+}
+```
+
+### 2. Radar Frames Metadata
+```bash
+GET /api/v1/radar
+```
+
+### 3. Preset Locations
+```bash
+GET /api/v1/locations
+```
+
+### 4. Health Check
+```bash
+GET /api/v1/health
+```
+
+---
+
+## 🧪 Testing
+
+Run the full ExUnit test suite:
+```bash
+mix test
+```
+
+---
+
+## 📄 License
+MIT License. Open source for all Belgian weather enthusiasts.

@@ -1,0 +1,21 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zeroweather:latest
+    container_name: zeroweather
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - PHX_SERVER=true
+      - SECRET_KEY_BASE=5mQk7k7vY5rWbV2L6qR3x8mN9pP1sT4uX7yZ0aC3dE6fG9hI2jK5lM8nO1pQ4rS7
+      - PHX_HOST=localhost
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
