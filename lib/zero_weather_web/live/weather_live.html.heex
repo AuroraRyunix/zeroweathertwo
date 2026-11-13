@@ -336,15 +336,16 @@
             <span class="text-sky-400 font-semibold">Live</span>
             <span>{if Enum.any?(@frames, & &1[:forecast_min]), do: "Forecast (+60m)", else: "Nowcast"}</span>
           </div>
-          <input
-            type="range"
-            min="0"
-            max={length(@frames) - 1}
-            value={@active_frame_index}
-            phx-change="set_frame"
-            name="index"
-            class="w-full accent-sky-500 cursor-pointer h-2 bg-slate-800 rounded-lg appearance-none"
-          />
+          <form id="radar-frame-form" phx-change="set_frame" onsubmit="return false">
+            <input
+              type="range"
+              min="0"
+              max={length(@frames) - 1}
+              value={@active_frame_index}
+              name="index"
+              class="w-full accent-sky-500 cursor-pointer h-2 bg-slate-800 rounded-lg appearance-none"
+            />
+          </form>
         </div>
       <% end %>
     </div>

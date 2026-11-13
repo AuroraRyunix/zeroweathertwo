@@ -174,4 +174,22 @@ defmodule ZeroWeatherWeb.WeatherLiveTest do
     assert ZeroWeatherWeb.WeatherLive.with_forecast(past, %{motion: %{known: false}}) == past
     assert ZeroWeatherWeb.WeatherLive.with_forecast(past, nil) == past
   end
+
+  test "moving the slider to a forecast frame updates the frame label", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/")
+    render_async(view)
+
+    last =
+      view
+      |> element("#radar-frame-form input")
+      |> render()
+      |> then(&Regex.run(~r/max="(\d+)"/, &1))
+      |> Enum.at(1)
+
+    html = view |> form("#radar-frame-form", %{"index" => last}) |> render_change()
+
+    assert html =~ "Forecast +60 min"
+    assert_push_event(view, "change-radar-frame", %{shiftEast: east})
+    assert east > 0
+  end
 end
