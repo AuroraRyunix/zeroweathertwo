@@ -34,13 +34,14 @@ spec:
                 secretKeyRef:
                   name: zeroweather-secrets
                   key: secret-key-base
+          # the radar nowcast decodes 512x512 RGBA tiles; 128Mi was OOM-killed
           resources:
             requests:
               cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 250m
               memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
           livenessProbe:
             httpGet:
               path: /api/v1/health
