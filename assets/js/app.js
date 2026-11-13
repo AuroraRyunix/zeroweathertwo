@@ -43,18 +43,39 @@ const Hooks = {
         attributionControl: false
       }).setView([lat, lon], 8)
 
-      // Base layer (CartoDB Dark Matter)
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      L.control.attribution({prefix: false}).addTo(this.map)
+
+      // Base layer: Esri World Dark Gray (no API key). CARTO's basemaps now return an "API key required" tile.
+      const esri = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas"
+      L.tileLayer(`${esri}/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`, {
         maxZoom: 19,
-        subdomains: "abcd"
+        maxNativeZoom: 16,
+        attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, FAO, NOAA, USGS, &copy; OpenStreetMap contributors"
       }).addTo(this.map)
+
+      // Place labels live in their own pane so they stay above the radar overlay
+      this.map.createPane("labels")
+      this.map.getPane("labels").style.zIndex = 650
+      this.map.getPane("labels").style.pointerEvents = "none"
+      L.tileLayer(`${esri}/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, {
+        pane: "labels",
+        maxZoom: 19,
+        maxNativeZoom: 16
+      }).addTo(this.map)
+
+      // RainViewer's free radar tiles only exist up to zoom 7 (higher zooms return a "not supported" image),
+      // so cap the native zoom and let Leaflet scale the zoom-7 tiles up.
+      const radarTiles = (url) =>
+        L.tileLayer(url, {
+          opacity: 0.7,
+          zIndex: 10,
+          maxNativeZoom: 7,
+          attribution: '<a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>'
+        })
 
       // Radar Overlay Layer
       if (tileUrl) {
-        this.radarLayer = L.tileLayer(tileUrl, {
-          opacity: 0.7,
-          zIndex: 10
-        }).addTo(this.map)
+        this.radarLayer = radarTiles(tileUrl).addTo(this.map)
       }
 
       // Location Marker
@@ -73,10 +94,7 @@ const Hooks = {
           this.map.removeLayer(this.radarLayer)
         }
         if (tileUrl) {
-          this.radarLayer = L.tileLayer(tileUrl, {
-            opacity: 0.7,
-            zIndex: 10
-          }).addTo(this.map)
+          this.radarLayer = radarTiles(tileUrl).addTo(this.map)
         }
       })
 
