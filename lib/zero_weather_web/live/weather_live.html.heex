@@ -1,328 +1,186 @@
-<div class="min-h-screen bg-slate-950 text-slate-100 font-sans pb-16">
-  <!-- Top Header Navigation -->
-  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-40">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-xl shadow-lg shadow-sky-500/20">
-          ⚡
-        </div>
-        <div>
-          <span class="font-bold text-lg tracking-tight text-white">ZeroWeather</span>
-          <span class="text-xs px-2 py-0.5 ml-2 rounded-full bg-sky-950 text-sky-400 border border-sky-800/60 font-medium">Belgium</span>
-        </div>
-      </div>
-
-      <div class="flex items-center space-x-3 text-xs">
-        <div class="hidden sm:flex items-center space-x-2 text-slate-400 bg-slate-800/60 px-3 py-1.5 rounded-full border border-slate-700/50">
-          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>15-min Nowcast & Live Radar</span>
-        </div>
-        <button
-          id="geo-btn"
-          phx-hook="Geolocation"
-          class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/30 transition text-xs font-medium cursor-pointer"
-        >
-          <span>📍</span>
-          <span>My GPS</span>
+<div class="min-h-screen pb-16">
+  <header>
+    <div class="zw-wrap h-14 flex items-center justify-between">
+      <span class="font-semibold">ZeroWeather</span>
+      <div class="flex items-center gap-2">
+        <%= if @active_location.id != "ghent" do %>
+          <button id="home-btn" phx-click="select_location" phx-value-id="ghent" class="zw-btn">
+            Ghent
+          </button>
+        <% end %>
+        <button id="geo-btn" phx-hook="Geolocation" class="zw-btn">Use my location</button>
+        <button id="theme-btn" type="button" onclick="zwToggleTheme()" class="zw-btn">
+          Light / dark
         </button>
       </div>
-    </div>
-
-    <!-- Location Selector Pills -->
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 overflow-x-auto scrollbar-none flex items-center space-x-2 border-t border-slate-800/40">
-      <span class="text-xs text-slate-500 uppercase tracking-wider font-semibold mr-1 shrink-0">Presets:</span>
-      <%= for loc <- @locations do %>
-        <button
-          phx-click="select_location"
-          phx-value-id={loc.id}
-          class={[
-            "px-3 py-1 rounded-full text-xs font-medium transition shrink-0 cursor-pointer",
-            if(@active_location.id == loc.id,
-              do: "bg-sky-500 text-white shadow-md shadow-sky-500/30",
-              else:
-                "bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/50"
-            )
-          ]}
-        >
-          {loc.name}
-        </button>
-      <% end %>
     </div>
   </header>
 
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
+  <main class="zw-wrap">
     <%= if @error_message do %>
-      <div class="p-4 rounded-xl bg-red-950/60 border border-red-800 text-red-200 text-sm">
-        {@error_message}
-      </div>
+      <p class="py-3 text-sm" style="color: var(--zw-chance)">{@error_message}</p>
     <% end %>
 
-    <!-- Hero Status Card -->
     <%= if @weather do %>
-      <div class="p-6 sm:p-8 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-850 border border-slate-800 shadow-xl relative overflow-hidden">
-        <div class="absolute -right-12 -top-12 w-64 h-64 bg-sky-500/10 rounded-full blur-3xl pointer-events-none">
+      <section class="py-6">
+        <h1 class="text-3xl font-semibold">{@active_location.name}</h1>
+        <p class="zw-muted text-sm mt-0.5">
+          {@active_location.lat}° N, {@active_location.lon}° E
+        </p>
+
+        <div class="mt-4 flex flex-wrap items-baseline gap-x-8 gap-y-1">
+          <span class="text-5xl font-semibold">{@weather.current.temperature}°C</span>
+          <span class="zw-muted">{@weather.current.condition_text}</span>
         </div>
 
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
-          <div>
-            <div class="flex items-center space-x-2 text-slate-400 text-xs font-medium uppercase tracking-wider">
-              <span>{@active_location.region}</span>
-              <span>•</span>
-              <span>{@active_location.lat}° N, {@active_location.lon}° E</span>
-            </div>
-            <h1 class="text-3xl sm:text-4xl font-extrabold text-white mt-1">
-              {@active_location.name}
-            </h1>
-            <div class="mt-3 flex items-center space-x-2">
-              <span class="text-2xl">{@weather.current.condition_icon}</span>
-              <p id="hero-summary" class="text-lg font-semibold text-sky-400">
-                {if @radar_nowcast,
-                  do: radar_hero_text(@radar_nowcast.summary),
-                  else: @weather.summary}
-              </p>
-            </div>
-          </div>
+        <p id="hero-summary" class="mt-4 text-lg">
+          {if @radar_nowcast,
+            do: radar_hero_text(@radar_nowcast.summary),
+            else: @weather.summary}
+        </p>
 
-          <!-- Current Weather Metrics Badges -->
-          <div class="flex flex-wrap items-center gap-3">
-            <div class="px-4 py-2.5 rounded-xl bg-slate-800/80 border border-slate-700/60 flex items-center space-x-3">
-              <span class="text-3xl font-bold text-white">
-                {@weather.current.temperature}°C
+        <dl class="zw-dl mt-5">
+          <dt>Wind</dt>
+          <dd>{@weather.current.wind_speed} km/h from {@weather.current.wind_direction}°</dd>
+          <dt>Humidity</dt>
+          <dd>{@weather.current.humidity}%</dd>
+          <dt>Pressure</dt>
+          <dd>{@weather.current.pressure} hPa</dd>
+          <dt>Precipitation now</dt>
+          <dd>{@weather.current.precipitation} mm</dd>
+          <%= if @weather.air_quality do %>
+            <dt>Air quality (EAQI)</dt>
+            <dd>
+              {@weather.air_quality.eaqi || "--"}, {@weather.air_quality.label}
+              <span class="zw-muted">
+                · PM2.5 {@weather.air_quality.pm2_5 || "--"} · PM10 {@weather.air_quality.pm10 ||
+                  "--"} · NO₂ {@weather.air_quality.no2 || "--"} µg/m³
               </span>
-              <div class="text-xs text-slate-400 text-left">
-                <div>{@weather.current.condition_text}</div>
-                <div class="text-slate-500">Humidity: {@weather.current.humidity}%</div>
-              </div>
-            </div>
+            </dd>
+          <% end %>
+          <dt>Elevation</dt>
+          <dd>{@weather.elevation} m</dd>
+        </dl>
+      </section>
 
-            <div class="px-4 py-2.5 rounded-xl bg-slate-800/80 border border-slate-700/60 text-xs">
-              <div class="text-slate-400">Wind</div>
-              <div class="text-sm font-semibold text-white">
-                {@weather.current.wind_speed} km/h
-              </div>
-              <div class="text-slate-500">Dir: {@weather.current.wind_direction}°</div>
-            </div>
-
-            <%= if @weather.air_quality do %>
-              <div class="px-4 py-2.5 rounded-xl bg-slate-800/80 border border-slate-700/60 text-xs">
-                <div class="text-slate-400">Air Quality (EAQI)</div>
-                <div class="text-sm font-semibold text-emerald-400">
-                  {@weather.air_quality.eaqi || "--"} • {@weather.air_quality.label}
-                </div>
-                <div class="text-slate-500">
-                  PM2.5: {@weather.air_quality.pm2_5 || "--"} μg/m³
-                </div>
-              </div>
-            <% end %>
-          </div>
-        </div>
-      </div>
-
-      <!-- Rain countdown: Buienradar 5-minute radar nowcast, interpolated to 1 minute -->
       <%= if @radar_nowcast do %>
-        <div
-          id="radar-nowcast-card"
-          class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl"
-        >
-          <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-4">
-            <div>
-              <h2 class="text-base font-bold text-white">⏱️ Rain countdown · next 2 hours</h2>
-              <p id="radar-nowcast-source" class="text-xs text-slate-400 mt-0.5">
-                <%= if own?(@radar_nowcast) do %>
-                  Our own nowcast: the rain's drift is tracked from the latest radar frames and advected to this spot, in 1-minute steps
-                <% else %>
-                  {@radar_nowcast.source} 5-minute radar nowcast, interpolated to 1 minute
-                <% end %>
-              </p>
-            </div>
-            <div id="radar-nowcast-updated" class="text-[11px] text-slate-500 sm:text-right">
-              <%= if own?(@radar_nowcast) do %>
-                Radar frame {local_clock(@radar_nowcast.frame_time)} ({@radar_nowcast.frame_age_min} min old) · recomputed every minute
-              <% else %>
-                Radar data fetched {local_clock(@radar_nowcast.fetched_at)} · refreshes every minute
-              <% end %>
-            </div>
-          </div>
+        <% chart = rain_chart(@radar_nowcast.series) %>
+        <section id="radar-nowcast-card" class="zw-section">
+          <h2 class="zw-h">Rain countdown, next 2 hours</h2>
 
-          <p id="radar-nowcast-headline" class="text-2xl sm:text-3xl font-extrabold text-white">
+          <p id="radar-nowcast-headline" class="text-xl font-semibold">
             {@radar_nowcast.summary.headline}
           </p>
           <%= if @radar_nowcast.summary.detail do %>
-            <p id="radar-nowcast-detail" class="mt-1 text-sky-400 font-semibold">
-              {@radar_nowcast.summary.detail}
-            </p>
-          <% end %>
-
-          <%= if own?(@radar_nowcast) do %>
-            <p id="radar-nowcast-motion" class="mt-2 text-xs text-slate-400">
-              {motion_text(@radar_nowcast.motion)}
-            </p>
+            <p id="radar-nowcast-detail" class="mt-1">{@radar_nowcast.summary.detail}</p>
           <% end %>
           <%= if @own_loading and not own?(@radar_nowcast) do %>
-            <p id="radar-nowcast-loading" class="mt-2 text-xs text-slate-500">
-              Computing our own radar nowcast… showing Buienradar's forecast meanwhile.
+            <p id="radar-nowcast-loading" class="mt-2 text-sm zw-muted">
+              Computing our own radar nowcast; showing Buienradar's forecast meanwhile.
             </p>
           <% end %>
 
-          <div
+          <svg
             id="radar-nowcast-strip"
+            viewBox={"0 0 #{chart.w} #{chart.h}"}
             role="img"
-            aria-label="Expected rainfall per minute for the next two hours"
-            class="mt-5 h-24 flex items-end gap-px border-b border-slate-800"
+            aria-label="Expected rain rate per minute and chance of rain for the next two hours"
+            class="zw-chart w-full mt-5"
           >
-            <%= for point <- @radar_nowcast.series do %>
-              <div class="flex-1 h-full flex items-end" title={nowcast_tooltip(point)}>
-                <div
-                  class={["w-full rounded-t-sm", strip_color(point.mm_h)]}
-                  style={"height: #{strip_height(point.mm_h)}%; opacity: #{strip_opacity(point)}"}
-                >
-                </div>
-              </div>
+            <%= for t <- chart.y_ticks do %>
+              <line class="grid" x1={chart.left} x2={chart.right} y1={t.y} y2={t.y} />
+              <text x={chart.left - 6} y={t.y + 3} text-anchor="end">{t.label}</text>
             <% end %>
-          </div>
-          <div class="mt-2 flex justify-between text-[11px] text-slate-500 font-mono">
-            <%= for point <- strip_labels(@radar_nowcast.series) do %>
-              <span>{point.time}</span>
-            <% end %>
-          </div>
-
-          <%= if own?(@radar_nowcast) and @buienradar do %>
-            <p id="radar-nowcast-crosscheck" class="mt-3 text-xs text-slate-500">
-              Cross-check, Buienradar's own forecast: {radar_hero_text(@buienradar.summary)}
-            </p>
-          <% end %>
-        </div>
-      <% end %>
-
-      <!-- 15-Minute Rain Histogram Chart -->
-      <% {chart_source, chart_steps} = chart_steps(@radar_nowcast, @weather.timeline) %>
-      <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl">
-        <div class="flex items-center justify-between mb-4">
-          <div>
-            <h2 class="text-base font-bold text-white flex items-center space-x-2">
-              <span>
-                🌧️ Precipitation Nowcast ({if chart_source == :one_minute,
-                  do: "Next 2 Hours",
-                  else: "Next 3 Hours"})
-              </span>
-            </h2>
-            <p class="text-xs text-slate-400 mt-0.5">
-              {if chart_source == :one_minute,
-                do: "1-minute expected rain rate and chance, from our own radar nowcast",
-                else: "15-minute expected rainfall and probability (Open-Meteo)"}
-            </p>
-          </div>
-          <div class="flex items-center space-x-4 text-xs">
-            <span class="flex items-center space-x-1.5 text-slate-400">
-              <span class="w-2.5 h-2.5 rounded bg-sky-400"></span>
-              <span>Light (&lt;1 mm)</span>
-            </span>
-            <span class="flex items-center space-x-1.5 text-slate-400">
-              <span class="w-2.5 h-2.5 rounded bg-blue-500"></span>
-              <span>Moderate (1-4 mm)</span>
-            </span>
-            <span class="flex items-center space-x-1.5 text-slate-400">
-              <span class="w-2.5 h-2.5 rounded bg-purple-600"></span>
-              <span>Heavy (&gt;4 mm)</span>
-            </span>
-          </div>
-        </div>
-
-        <!-- SVG Bar Chart -->
-        <div class="w-full overflow-x-auto">
-          <div class="min-w-[600px] h-48 relative flex items-end pt-8 pb-6 px-2 border-b border-slate-800">
-            <!-- Reference Lines -->
-            <div class="absolute inset-x-0 top-12 border-b border-dashed border-slate-800 pointer-events-none">
-              <span class="absolute right-0 -top-3 text-[10px] text-slate-600">Moderate (2.0 mm)</span>
-            </div>
-            <div class="absolute inset-x-0 top-24 border-b border-dashed border-slate-800/60 pointer-events-none">
-              <span class="absolute right-0 -top-3 text-[10px] text-slate-600">Light (1.0 mm)</span>
-            </div>
-
-            <!-- Bars -->
-            <div class="w-full h-full flex items-end justify-between gap-px">
-              <%= for step <- chart_steps do %>
-                <% # Scale height: max 4.0 mm is 100% height
-                height_pct = min(100, max(6, step.precip_mm / 4.0 * 100))
-
-                bar_color =
-                  cond do
-                    step.precip_mm <= 0.05 -> "bg-slate-800/60"
-                    step.precip_mm <= 1.0 -> "bg-sky-400"
-                    step.precip_mm <= 4.0 -> "bg-blue-500"
-                    true -> "bg-purple-600"
-                  end %>
-                <div class="flex-1 flex flex-col items-center h-full justify-end group">
-                  <!-- Rain probability tag if significant -->
-                  <div class="text-[10px] text-sky-400 font-semibold mb-1 opacity-80">
-                    <%= if step.probability > 10 and (chart_source == :fifteen_minute or step.show_prob) do %>
-                      {step.probability}%
-                    <% else %>
-                      &nbsp;
-                    <% end %>
-                  </div>
-
-                  <!-- The Bar -->
-                  <div
-                    style={"height: #{if step.precip_mm > 0.05, do: height_pct, else: 4}%"}
-                    class={[
-                      "w-full rounded-t-md transition-all duration-300 relative",
-                      bar_color,
-                      if(step.precip_mm > 0.05, do: "shadow-lg shadow-sky-500/20")
-                    ]}
-                  >
-                    <!-- Tooltip -->
-                    <div class="absolute -top-10 left-1/2 -translate-x-1/2 hidden group-hover:block bg-slate-800 text-white text-[11px] font-medium py-1 px-2 rounded-md shadow-xl whitespace-nowrap z-20 border border-slate-700">
-                      {step.time} · {step.precip_mm} mm/h ({step.probability}%)
-                    </div>
-                  </div>
-
-                  <!-- Time Label -->
-                  <div class="text-[11px] text-slate-400 mt-2 font-mono">
-                    {step.label}
-                  </div>
-                </div>
+            <%= if chart.has_chance do %>
+              <line
+                class="guide"
+                x1={chart.left}
+                x2={chart.right}
+                y1={chart.guide_y}
+                y2={chart.guide_y}
+              />
+              <%= for t <- chart.chance_ticks do %>
+                <text x={chart.right + 6} y={t.y + 3}>{t.label}</text>
               <% end %>
-            </div>
-          </div>
-        </div>
-      </div>
+            <% end %>
+            <%= for bar <- chart.bars do %>
+              <rect class="bar" x={bar.x} y={bar.y} width={bar.w} height={bar.h}>
+                <title>{bar.title}</title>
+              </rect>
+            <% end %>
+            <%= if chart.line do %>
+              <polyline class="line" points={chart.line} />
+            <% end %>
+            <line class="now" x1={chart.left} x2={chart.left} y1={chart.top} y2={chart.bottom} />
+            <%= for t <- chart.x_ticks do %>
+              <text x={t.x} y={chart.bottom + 14} text-anchor="middle">{t.label}</text>
+            <% end %>
+            <text x={chart.left - 6} y={chart.top - 2} text-anchor="end">mm/h</text>
+            <%= if chart.has_chance do %>
+              <text x={chart.right + 6} y={chart.top - 2}>chance</text>
+            <% end %>
+          </svg>
+          <p class="mt-2 text-xs zw-muted">
+            <span class="zw-key" style="background: var(--zw-rain)"></span>expected rain rate
+            <%= if chart.has_chance do %>
+              <span class="zw-key ml-4" style="background: var(--zw-chance)"></span>chance of rain
+              (dashed: 50%, called "likely" above it)
+            <% end %>
+          </p>
+
+          <h3 class="zw-h mt-6">Tracking data</h3>
+          <%= if own?(@radar_nowcast) do %>
+            <dl id="radar-nowcast-tracking" class="zw-dl">
+              <dt>Method</dt>
+              <dd id="radar-nowcast-source">
+                Our own nowcast: radar frames tracked and advected to this point, 1-minute steps
+              </dd>
+              <dt>Rain drift</dt>
+              <dd id="radar-nowcast-motion">{motion_text(@radar_nowcast.motion)}</dd>
+              <dt>Track confidence</dt>
+              <dd>
+                {@radar_nowcast.motion.quality} (0 to 1; below 0.45 the rain is assumed to stay put)
+              </dd>
+              <dt>Radar frame</dt>
+              <dd id="radar-nowcast-updated">
+                Radar frame {local_clock(@radar_nowcast.frame_time)}, {@radar_nowcast.frame_age_min} min old;
+                recomputed every minute
+              </dd>
+              <%= if @buienradar do %>
+                <dt>Cross-check</dt>
+                <dd id="radar-nowcast-crosscheck">
+                  Cross-check, Buienradar's own forecast: {radar_hero_text(@buienradar.summary)}
+                </dd>
+              <% end %>
+            </dl>
+          <% else %>
+            <dl class="zw-dl">
+              <dt>Method</dt>
+              <dd id="radar-nowcast-source">
+                {@radar_nowcast.source} 5-minute radar nowcast, interpolated to 1 minute
+              </dd>
+              <dt>Fetched</dt>
+              <dd id="radar-nowcast-updated">
+                {local_clock(@radar_nowcast.fetched_at)}; refreshes every minute
+              </dd>
+            </dl>
+          <% end %>
+        </section>
+      <% end %>
     <% end %>
 
-    <!-- Live Animated Radar Section -->
-    <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 class="text-base font-bold text-white flex items-center space-x-2">
-            <span>📡 Real-time Precipitation Radar Composite</span>
-          </h2>
-          <p class="text-xs text-slate-400 mt-0.5">
-            Live Doppler radar mosaic covering Belgium and borders
-          </p>
-        </div>
-
-        <!-- Frame Time Indicator -->
-        <div class="flex items-center space-x-2 text-xs">
-          <% current_f = current_frame(@frames, @active_frame_index) %>
-          <div class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 font-mono border border-slate-700">
-            🕒 {format_frame_time(current_f)}
-          </div>
-          <button
-            phx-click="toggle_play"
-            class={[
-              "px-3 py-1.5 rounded-lg font-medium transition cursor-pointer text-xs flex items-center space-x-1",
-              if(@is_playing,
-                do: "bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/30",
-                else: "bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-600/30"
-              )
-            ]}
-          >
-            <span>{if @is_playing, do: "⏸ Pause", else: "▶ Animate"}</span>
+    <section class="zw-section">
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 class="zw-h">Radar</h2>
+        <% current_f = current_frame(@frames, @active_frame_index) %>
+        <div class="flex items-center gap-3 text-sm">
+          <span id="radar-frame-label">{format_frame_time(current_f)}</span>
+          <button phx-click="toggle_play" class="zw-btn">
+            {if @is_playing, do: "Pause", else: "Play"}
           </button>
         </div>
       </div>
 
-      <!-- Leaflet Map Container -->
       <% initial_tile = (Enum.at(@frames, @active_frame_index) || %{})[:tile_url_template] %>
       <div
         id="radar-map"
@@ -331,19 +189,19 @@
         data-lat={@active_location.lat}
         data-lon={@active_location.lon}
         data-tile-url={initial_tile}
-        class="w-full h-96 sm:h-[480px] rounded-xl overflow-hidden border border-slate-800 bg-slate-950 relative z-0"
+        class="w-full h-96 sm:h-[460px] relative z-0 border"
+        style="border-color: var(--zw-line); background: var(--zw-surface)"
       >
       </div>
 
-      <!-- Radar Timeline Scrubber Slider -->
       <%= if length(@frames) > 0 do %>
-        <div class="pt-2 px-1">
-          <div class="flex items-center justify-between text-xs text-slate-400 mb-1 font-mono">
-            <span>Past (-60m)</span>
-            <span class="text-sky-400 font-semibold">Live</span>
-            <span>{if Enum.any?(@frames, & &1[:forecast_min]),
-              do: "Forecast (+60m)",
-              else: "Nowcast"}</span>
+        <div class="pt-2">
+          <div class="flex justify-between text-xs zw-muted mb-1">
+            <span>Past, -60 min</span>
+            <span>Now</span>
+            <span>
+              {if Enum.any?(@frames, & &1[:forecast_min]), do: "Forecast, +60 min", else: ""}
+            </span>
           </div>
           <form id="radar-frame-form" phx-change="set_frame" onsubmit="return false">
             <input
@@ -352,53 +210,58 @@
               max={length(@frames) - 1}
               value={@active_frame_index}
               name="index"
-              class="w-full accent-sky-500 cursor-pointer h-2 bg-slate-800 rounded-lg appearance-none"
             />
           </form>
         </div>
       <% end %>
-    </div>
+    </section>
 
-    <!-- Atmospheric & Ground Station Details -->
-    <%= if @weather do %>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
-          <div class="text-xs text-slate-500">Surface Pressure</div>
-          <div class="text-lg font-bold text-white mt-1">{@weather.current.pressure} hPa</div>
-          <div class="text-[11px] text-slate-500 mt-0.5">Barometric pressure</div>
-        </div>
-
-        <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
-          <div class="text-xs text-slate-500">Elevation</div>
-          <div class="text-lg font-bold text-white mt-1">{@weather.elevation} m</div>
-          <div class="text-[11px] text-slate-500 mt-0.5">Above sea level</div>
-        </div>
-
-        <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
-          <div class="text-xs text-slate-500">Particulate Matter (PM10)</div>
-          <div class="text-lg font-bold text-white mt-1">
-            {(@weather.air_quality && @weather.air_quality.pm10) || "--"} μg/m³
-          </div>
-          <div class="text-[11px] text-slate-500 mt-0.5">Air quality index</div>
-        </div>
-
-        <div class="p-4 rounded-xl bg-slate-900 border border-slate-800">
-          <div class="text-xs text-slate-500">Nitrogen Dioxide (NO₂)</div>
-          <div class="text-lg font-bold text-white mt-1">
-            {(@weather.air_quality && @weather.air_quality.no2) || "--"} μg/m³
-          </div>
-          <div class="text-[11px] text-slate-500 mt-0.5">Traffic / emissions</div>
-        </div>
-      </div>
-    <% end %>
+    <section id="sources" class="zw-section">
+      <h2 class="zw-h">How this is sourced</h2>
+      <dl class="zw-dl" style="grid-template-columns: 11rem 1fr">
+        <dt>Rain forecast</dt>
+        <dd>
+          Computed here from the
+          <a href="https://www.rainviewer.com/" class="underline">RainViewer</a>
+          radar composite (one image every 10 minutes). Each pixel's colour is converted back to
+          reflectivity and then to a rain rate (Marshall-Palmer, Z = 200 R^1.6), and averaged into
+          0.75 km cells.
+        </dd>
+        <dt>Drift</dt>
+        <dd>
+          The shift that best maps the previous frame onto the newest (normalised cross-correlation
+          over the rain near the point, two frame pairs combined when they agree). The newest frame
+          is then moved along that drift: the rain that will be here in <em>t</em>
+          minutes is the rain that is drift × <em>t</em>
+          upstream now. Showers neither grow nor decay.
+        </dd>
+        <dt>Chance</dt>
+        <dd>
+          The share of a surrounding area (it widens with lead time) that is wet, corrected with a
+          calibration table: a raw 100% turned out right about 98% of the time at +10 min but about 55%
+          at +55 min. The table comes from about two hours of one afternoon's radar, so treat the
+          percentages as rough.
+        </dd>
+        <dt>Limits</dt>
+        <dd>
+          Frames are 10 minutes apart and about 5 to 7 minutes old when read, and the radar resolves
+          about 1 km. The minute-by-minute timing is an extrapolation, not 1-minute data.
+        </dd>
+        <dt>Cross-check</dt>
+        <dd>
+          <a href="https://www.buienradar.nl/" class="underline">Buienradar</a>'s 5-minute point forecast
+          (interpolated to 1 minute); it is also the fallback while ours is computing.
+        </dd>
+        <dt>Conditions, air quality</dt>
+        <dd>
+          <a href="https://open-meteo.com/" class="underline">Open-Meteo</a>
+          weather and air quality (Copernicus CAMS).
+        </dd>
+        <dt>Map</dt>
+        <dd>
+          Esri gray base map (© Esri, HERE, Garmin, FAO, NOAA, USGS, © OpenStreetMap contributors).
+        </dd>
+      </dl>
+    </section>
   </main>
-
-  <footer class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 text-center text-xs text-slate-600">
-    <p>
-      ZeroWeather Belgium · Powered by Elixir & Phoenix LiveView · Built for VMware vSphere & Photon OS
-    </p>
-    <p class="mt-1">
-      Data sources: Buienradar 5-minute nowcast, RainViewer Radar, RMI Open Data, Open-Meteo DWD ICON-D2 & Copernicus Air Quality
-    </p>
-  </footer>
 </div>

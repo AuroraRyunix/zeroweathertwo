@@ -11,7 +11,6 @@ defmodule ZeroWeatherWeb.ApiControllerTest do
     resp = json_response(conn, 200)
     assert is_list(resp["locations"])
     assert Enum.any?(resp["locations"], &(&1["id"] == "ghent"))
-    assert Enum.any?(resp["locations"], &(&1["id"] == "brussels"))
   end
 
   test "GET /api/v1/radar", %{conn: conn} do

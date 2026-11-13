@@ -45,23 +45,30 @@ const Hooks = {
 
       L.control.attribution({prefix: false}).addTo(this.map)
 
-      // Base layer: Esri World Dark Gray (no API key). CARTO's basemaps now return an "API key required" tile.
+      // Base map in the page's theme (Esri gray canvas, no API key). CARTO's basemaps now return an "API key required" tile.
       const esri = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas"
-      L.tileLayer(`${esri}/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`, {
-        maxZoom: 19,
-        maxNativeZoom: 16,
-        attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, FAO, NOAA, USGS, &copy; OpenStreetMap contributors"
-      }).addTo(this.map)
+      const attribution = "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, FAO, NOAA, USGS, &copy; OpenStreetMap contributors"
 
       // Place labels live in their own pane so they stay above the radar overlay
       this.map.createPane("labels")
       this.map.getPane("labels").style.zIndex = 650
       this.map.getPane("labels").style.pointerEvents = "none"
-      L.tileLayer(`${esri}/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, {
-        pane: "labels",
-        maxZoom: 19,
-        maxNativeZoom: 16
-      }).addTo(this.map)
+
+      const applyBase = () => {
+        const theme = document.documentElement.getAttribute("data-theme") === "dark" ? "Dark" : "Light"
+        if (this.baseLayer) this.map.removeLayer(this.baseLayer)
+        if (this.labelLayer) this.map.removeLayer(this.labelLayer)
+        this.baseLayer = L.tileLayer(`${esri}/World_${theme}_Gray_Base/MapServer/tile/{z}/{y}/{x}`, {
+          maxZoom: 19, maxNativeZoom: 16, attribution
+        }).addTo(this.map)
+        this.baseLayer.bringToBack()
+        this.labelLayer = L.tileLayer(`${esri}/World_${theme}_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, {
+          pane: "labels", maxZoom: 19, maxNativeZoom: 16
+        }).addTo(this.map)
+      }
+      applyBase()
+      this.themeListener = applyBase
+      window.addEventListener("zw:theme", this.themeListener)
 
       // RainViewer's free radar tiles only exist up to zoom 7 (higher zooms return a "not supported" image),
       // so cap the native zoom and let Leaflet scale the zoom-7 tiles up.
@@ -97,7 +104,7 @@ const Hooks = {
       // Location Marker
       this.marker = L.circleMarker([lat, lon], {
         radius: 8,
-        fillColor: "#38bdf8",
+        fillColor: "#1f5fbf",
         color: "#ffffff",
         weight: 2,
         opacity: 1,
@@ -125,6 +132,7 @@ const Hooks = {
       })
     },
     destroyed() {
+      if (this.themeListener) window.removeEventListener("zw:theme", this.themeListener)
       if (this.map) {
         this.map.remove()
       }

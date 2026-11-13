@@ -26,10 +26,16 @@
           }
         };
         if (!document.documentElement.hasAttribute("data-theme")) {
-          setTheme(localStorage.getItem("phx:theme") || "system");
+          setTheme(localStorage.getItem("phx:theme") || "light");
         }
         window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
         window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
+
+        window.zwToggleTheme = () => {
+          const now = document.documentElement.getAttribute("data-theme");
+          setTheme(now === "dark" ? "light" : "dark");
+          window.dispatchEvent(new CustomEvent("zw:theme"));
+        };
 
         matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
           if (document.documentElement.getAttribute("data-theme-source") === "system") {
@@ -39,7 +45,7 @@
       })();
     </script>
   </head>
-  <body>
+  <body class="zw">
     {@inner_content}
   </body>
 </html>

@@ -103,3 +103,48 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+
+/* ZeroWeather page: plain, data first. Colours are variables so the light and dark themes share one stylesheet. */
+:root, [data-theme=light] {
+  --zw-bg: #f6f5f1;
+  --zw-surface: #ffffff;
+  --zw-text: #1b1d1f;
+  --zw-muted: #5f656b;
+  --zw-line: #dcdad2;
+  --zw-rain: #1f5fbf;
+  --zw-chance: #b4541a;
+  --zw-accent: #1f5fbf;
+  color-scheme: light;
+}
+[data-theme=dark] {
+  --zw-bg: #15171a;
+  --zw-surface: #1c1f23;
+  --zw-text: #e8e6e1;
+  --zw-muted: #9aa0a6;
+  --zw-line: #31353a;
+  --zw-rain: #6ea8ff;
+  --zw-chance: #e59a62;
+  --zw-accent: #6ea8ff;
+  color-scheme: dark;
+}
+body { background: var(--zw-bg); color: var(--zw-text); }
+.zw { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-variant-numeric: tabular-nums; }
+.zw-wrap { max-width: 56rem; margin: 0 auto; padding: 0 1rem; }
+.zw-muted { color: var(--zw-muted); }
+.zw-rule { border-top: 1px solid var(--zw-line); }
+.zw-section { padding: 1.75rem 0; border-top: 1px solid var(--zw-line); }
+.zw-h { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--zw-muted); margin-bottom: 0.75rem; }
+.zw-btn { font: inherit; font-size: 0.85rem; color: var(--zw-text); background: transparent; border: 1px solid var(--zw-line); border-radius: 4px; padding: 0.3rem 0.65rem; cursor: pointer; }
+.zw-btn:hover { border-color: var(--zw-muted); }
+.zw-dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1.5rem; font-size: 0.9rem; }
+.zw-dl dt { color: var(--zw-muted); }
+.zw-dl dd { margin: 0; }
+.zw-chart text { fill: var(--zw-muted); font-size: 10px; }
+.zw-chart .grid { stroke: var(--zw-line); stroke-width: 1; }
+.zw-chart .guide { stroke: var(--zw-chance); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
+.zw-chart .bar { fill: var(--zw-rain); }
+.zw-chart .line { fill: none; stroke: var(--zw-chance); stroke-width: 1.5; }
+.zw-chart .now { stroke: var(--zw-text); stroke-width: 1; opacity: 0.35; }
+.zw-key { display: inline-block; width: 0.7rem; height: 0.7rem; margin-right: 0.35rem; vertical-align: -1px; }
+.zw input[type=range] { width: 100%; accent-color: var(--zw-accent); }

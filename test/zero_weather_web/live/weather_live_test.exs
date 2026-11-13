@@ -155,7 +155,7 @@ defmodule ZeroWeatherWeb.WeatherLiveTest do
     html = render_async(view)
 
     # the drift in the model is 2 cells / 10 min towards the east
-    assert html =~ "Forecast (+60m)"
+    assert html =~ "Forecast, +60 min"
   end
 
   test "forecast frames carry the drift as an east/north shift in km" do
@@ -193,27 +193,43 @@ defmodule ZeroWeatherWeb.WeatherLiveTest do
     assert east > 0
   end
 
-  test "the precipitation chart uses 5-minute steps of our nowcast", %{conn: conn} do
+  test "the rain graph has a bar per minute, the chance line and the tracking data", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/")
     html = render_async(view)
 
-    assert html =~ "Precipitation Nowcast (Next 2 Hours)"
-    assert html =~ "1-minute expected rain rate"
-    refute html =~ "15-minute expected rainfall"
+    assert has_element?(view, "svg#radar-nowcast-strip polyline.line")
+    assert has_element?(view, "svg#radar-nowcast-strip rect.bar")
+    assert html =~ "Tracking data"
+    assert html =~ "Track confidence"
+    assert html =~ "How this is sourced"
+    refute html =~ "Presets"
+    refute html =~ "My GPS"
+    refute html =~ "15-min Nowcast"
   end
 
-  test "chart steps: 120 one-minute bars, or the 15-minute timeline as fallback" do
+  test "rain_chart: one bar per minute, bounded heights, chance line only when the series has chance" do
     series =
-      for m <- 0..119,
-          do: %{time: "12:#{m}", mm_h: 2.0, mean_mm_h: 1.0, chance: if(m < 5, do: 80, else: 5)}
+      for m <- 0..119, do: %{time: "12:#{m}", mm_h: 3.0, mean_mm_h: 1.2, chance: min(m, 100)}
 
-    {:one_minute, steps} = ZeroWeatherWeb.WeatherLive.chart_steps(%{series: series}, [])
-    assert length(steps) == 120
+    chart = ZeroWeatherWeb.WeatherLive.rain_chart(series)
 
-    assert hd(steps).probability == 80 and hd(steps).precip_mm == 1.0 and
-             hd(steps).label == "12:0"
+    assert length(chart.bars) == 120
+    assert chart.has_chance and is_binary(chart.line)
 
-    assert {:fifteen_minute, [%{label: "12:00"}]} =
-             ZeroWeatherWeb.WeatherLive.chart_steps(nil, [%{time: "12:00"}])
+    assert Enum.all?(
+             chart.bars,
+             &(&1.h >= 0 and &1.y >= chart.top and &1.y + &1.h <= chart.bottom + 0.01)
+           )
+
+    assert hd(chart.y_ticks).label == 0
+    assert List.last(chart.y_ticks).label == 2
+
+    plain =
+      ZeroWeatherWeb.WeatherLive.rain_chart(
+        Enum.map(series, &Map.drop(&1, [:chance, :mean_mm_h]))
+      )
+
+    refute plain.has_chance
+    assert plain.line == nil
   end
 end

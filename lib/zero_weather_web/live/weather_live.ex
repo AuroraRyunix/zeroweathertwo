@@ -342,53 +342,18 @@ defmodule ZeroWeatherWeb.WeatherLive do
   def own?(%{method: "radar-advection"}), do: true
   def own?(_), do: false
 
-  @doc "Tooltip text of one minute of the strip."
-  def nowcast_tooltip(point) do
-    base = "#{point.time} · #{point.mm_h} mm/h"
-
-    case Map.get(point, :chance) do
-      nil -> base
-      chance -> "#{base} · #{chance}% chance of rain nearby"
-    end
-  end
-
   @doc "One sentence about the estimated drift of the rain."
   def motion_text(%{known: true, speed_km_h: speed, from: from}) when speed >= 1.0,
-    do: "🧭 Rain is drifting from the #{from} at #{speed} km/h"
+    do: "Rain is drifting from the #{from} at #{speed} km/h"
 
-  def motion_text(%{known: true}), do: "🧭 Rain is almost stationary"
+  def motion_text(%{known: true}), do: "Rain is almost stationary"
 
   def motion_text(_),
-    do: "🧭 Drift unknown (too little rain nearby to track), so rain is assumed to stay put"
+    do: "Unknown (too little rain nearby to track), so rain is assumed to stay put"
 
   @doc "One-line version of the countdown for the hero card."
   def radar_hero_text(%{headline: headline, detail: nil}), do: headline
   def radar_hero_text(%{headline: headline, detail: detail}), do: "#{headline} #{detail}"
-
-  @doc """
-  Bars of the precipitation chart: the 1-minute steps of our radar nowcast (expected rate and chance), or the
-  Open-Meteo 15-minute timeline when no radar nowcast is available. Returns `{source, steps}`.
-  """
-  def chart_steps(%{series: [_ | _] = series}, _timeline) do
-    steps =
-      series
-      |> Enum.with_index()
-      |> Enum.map(fn {point, i} ->
-        %{
-          time: point.time,
-          label: if(rem(i, 15) == 0, do: point.time, else: ""),
-          show_prob: rem(i, 10) == 0,
-          precip_mm: Float.round((Map.get(point, :mean_mm_h) || point.mm_h) * 1.0, 2),
-          probability: Map.get(point, :chance, 0)
-        }
-      end)
-
-    {:one_minute, steps}
-  end
-
-  def chart_steps(_nowcast, timeline) do
-    {:fifteen_minute, Enum.map(timeline || [], &Map.put(&1, :label, &1.time))}
-  end
 
   @doc "Local (Belgian) clock time of an ISO8601 UTC timestamp."
   def local_clock(iso) when is_binary(iso) do
@@ -398,32 +363,82 @@ defmodule ZeroWeatherWeb.WeatherLive do
     end
   end
 
-  # Square-root scale so light drizzle is still visible next to a downpour (5 mm/h = full height).
-  def strip_height(mm_h) when mm_h < 0.05, do: 3
-  def strip_height(mm_h), do: min(100, max(8, round(:math.sqrt(mm_h / 5.0) * 100)))
+  @chart %{w: 720, h: 230, left: 44, right: 676, top: 16, bottom: 196}
 
-  @doc "Bars fade with the chance of rain (own nowcast); Buienradar points carry no chance and stay solid."
-  def strip_opacity(%{chance: chance}) when is_number(chance),
-    do: Float.round(0.25 + 0.75 * min(max(chance, 0), 100) / 100, 2)
+  @doc """
+  Geometry of the rain graph: one bar per minute (expected rain rate, mm/h) and, when the series carries it, a line
+  for the calibrated chance of rain (right axis, 0 to 100 %).
+  """
+  def rain_chart(series) do
+    %{left: left, right: right, top: top, bottom: bottom} = @chart
+    n = max(length(series), 1)
+    width = (right - left) * 1.0
+    height = (bottom - top) * 1.0
+    step = width / n
 
-  def strip_opacity(_point), do: 1.0
+    rate = fn p -> Map.get(p, :mean_mm_h) || p.mm_h end
+    ymax = series |> Enum.map(rate) |> Enum.max(fn -> 0 end) |> nice_max()
+    has_chance = Enum.any?(series, &is_number(Map.get(&1, :chance)))
 
-  def strip_color(mm_h) when mm_h < 0.05, do: "bg-slate-800/60"
-  def strip_color(mm_h) when mm_h <= 1.0, do: "bg-sky-400"
-  def strip_color(mm_h) when mm_h <= 4.0, do: "bg-blue-500"
-  def strip_color(_mm_h), do: "bg-purple-600"
+    bars =
+      series
+      |> Enum.with_index()
+      |> Enum.map(fn {p, i} ->
+        r = rate.(p)
+        h = min(height, r / ymax * height)
 
-  @doc "A handful of evenly spaced points of the series to label the time axis."
-  def strip_labels([]), do: []
+        %{
+          x: Float.round(left + i * step, 2),
+          y: Float.round(bottom - h, 2),
+          w: Float.round(max(step - 0.4, 0.5), 2),
+          h: Float.round(h, 2),
+          title:
+            "#{p.time} · #{r} mm/h" <>
+              if(has_chance, do: " · #{Map.get(p, :chance, 0)}% chance", else: "")
+        }
+      end)
 
-  def strip_labels(series) do
-    last = length(series) - 1
+    line =
+      if has_chance do
+        series
+        |> Enum.with_index()
+        |> Enum.map_join(" ", fn {p, i} ->
+          y = bottom - Map.get(p, :chance, 0) / 100 * height
+          "#{Float.round(left + (i + 0.5) * step, 1)},#{Float.round(y, 1)}"
+        end)
+      end
 
-    [0, 30, 60, 90, last]
-    |> Enum.filter(&(&1 <= last))
-    |> Enum.uniq()
-    |> Enum.map(&Enum.at(series, &1))
+    %{
+      w: @chart.w,
+      h: @chart.h,
+      left: left,
+      right: right,
+      top: top,
+      bottom: bottom,
+      bars: bars,
+      line: line,
+      has_chance: has_chance,
+      guide_y: bottom - height / 2,
+      y_ticks: for(f <- [0, 0.5, 1], do: %{y: bottom - f * height, label: format_axis(ymax * f)}),
+      chance_ticks:
+        for(f <- [0, 0.5, 1], do: %{y: bottom - f * height, label: "#{round(f * 100)}%"}),
+      x_ticks:
+        for(
+          i <- [0, 30, 60, 90, 119],
+          p = Enum.at(series, i),
+          do: %{x: Float.round(left + (i + 0.5) * step, 1), label: p.time}
+        )
+    }
   end
+
+  defp nice_max(peak) when peak <= 1.0, do: 1.0
+  defp nice_max(peak) when peak <= 2.0, do: 2.0
+  defp nice_max(peak) when peak <= 5.0, do: 5.0
+  defp nice_max(peak) when peak <= 10.0, do: 10.0
+  defp nice_max(peak), do: Float.ceil(peak / 10) * 10
+
+  defp format_axis(v),
+    do: v |> Float.round(1) |> then(&if(&1 == trunc(&1), do: trunc(&1), else: &1))
 
   def current_frame(frames, index) do
     Enum.at(frames, index)
