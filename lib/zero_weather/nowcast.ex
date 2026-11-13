@@ -240,39 +240,46 @@ defmodule ZeroWeather.Nowcast do
 
   # -- Countdown summary -----------------------------------------------------------------
 
-  @doc "Turns the 1-minute series into a headline/detail countdown and the numbers behind it."
-  def summarize([]), do: %{state: :unknown, headline: "Radar nowcast unavailable", detail: nil}
+  @doc """
+  Turns the 1-minute series into a headline/detail countdown and the numbers behind it.
 
-  def summarize([current | _] = series) do
+  Options: `:rain?` decides whether a minute counts as (likely) rain (default: `mm_h >= 0.1`) and `:possible?`
+  (optional) marks minutes where rain is possible but not likely. With the second one the countdown can say
+  "Dry for the next 25 minutes. Rain possible from 15:10 (about 35% chance)." instead of claiming certainty.
+  """
+  def summarize(series, opts \\ [])
+
+  def summarize([], _opts),
+    do: %{state: :unknown, headline: "Radar nowcast unavailable", detail: nil}
+
+  def summarize([current | _] = series, opts) do
+    rain? = Keyword.get(opts, :rain?, &default_rain?/1)
+    possible? = Keyword.get(opts, :possible?)
     horizon = length(series)
 
-    if rain?(current),
-      do: summarize_raining(series, horizon),
-      else: summarize_dry(series, horizon)
+    if rain?.(current),
+      do: summarize_raining(series, horizon, rain?, possible? != nil),
+      else: summarize_dry(series, horizon, rain?, possible?)
   end
 
-  defp summarize_dry(series, horizon) do
-    case Enum.find_index(series, &rain?/1) do
+  defp summarize_dry(series, horizon, rain?, possible?) do
+    case Enum.find_index(series, rain?) do
       nil ->
-        %{
-          state: :dry,
-          headline: "Dry for the next #{span_text(horizon)}.",
-          detail: nil,
-          horizon_min: horizon
-        }
+        summarize_possible_or_dry(series, horizon, possible?)
 
       start_idx ->
-        {rain, after_rain} = series |> Enum.drop(start_idx) |> Enum.split_while(&rain?/1)
+        {rain, after_rain} = series |> Enum.drop(start_idx) |> Enum.split_while(rain?)
         start = hd(rain)
         peak = Enum.max_by(rain, & &1.mm_h)
         duration = length(rain)
         ended? = after_rain != []
+        early = early_chance(series, possible?, start_idx)
 
         %{
           state: :rain_soon,
           headline: dry_headline(start_idx),
           detail:
-            "Rain starting at #{start.time}, lasting #{duration_text(duration, ended?)}, " <>
+            "Rain starting at #{start.time}#{early_text(early)}, lasting #{duration_text(duration, ended?)}, " <>
               "peak #{fmt_rate(peak.mm_h)} mm/h.",
           starts_in_min: start_idx,
           starts_at: start.time,
@@ -285,8 +292,66 @@ defmodule ZeroWeather.Nowcast do
     end
   end
 
-  defp summarize_raining([current | _] = series, horizon) do
-    {rain, after_rain} = Enum.split_while(series, &rain?/1)
+  # A real chance of rain well before the minute we call "likely": say so instead of claiming it stays dry until then
+  defp early_chance(_series, nil, _start_idx), do: nil
+
+  defp early_chance(series, possible?, start_idx) do
+    case Enum.find_index(series, possible?) do
+      idx when is_integer(idx) and idx < start_idx - 4 -> Enum.at(series, idx).time
+      _ -> nil
+    end
+  end
+
+  defp early_text(nil), do: ""
+  defp early_text(time), do: " (a chance from #{time})"
+
+  defp summarize_possible_or_dry(_series, horizon, nil), do: dry_summary(horizon)
+
+  defp summarize_possible_or_dry(series, horizon, possible?) do
+    case Enum.find_index(series, possible?) do
+      nil ->
+        dry_summary(horizon)
+
+      idx ->
+        {episode, _} = series |> Enum.drop(idx) |> Enum.split_while(possible?)
+        start = hd(episode)
+        peak = Enum.max_by(episode, & &1.mm_h)
+        chance = episode |> Enum.map(&Map.get(&1, :chance, 0)) |> Enum.max()
+
+        %{
+          state: :rain_possible,
+          headline: possible_headline(idx, chance),
+          detail:
+            "Rain possible from #{start.time} (about #{chance}% chance, up to #{fmt_rate(peak.mm_h)} mm/h).",
+          starts_in_min: idx,
+          starts_at: start.time,
+          chance_pct: chance,
+          peak_mm_h: Float.round(peak.mm_h, 1),
+          horizon_min: horizon
+        }
+    end
+  end
+
+  defp dry_summary(horizon) do
+    %{
+      state: :dry,
+      headline: "Dry for the next #{span_text(horizon)}.",
+      detail: nil,
+      horizon_min: horizon
+    }
+  end
+
+  defp easing_text(true, time, ends_in),
+    do: "Rain likely easing around #{time} (in #{minutes_text(ends_in)})"
+
+  defp easing_text(false, time, ends_in),
+    do: "Easing below #{@rain_threshold} mm/h at #{time} (in #{minutes_text(ends_in)})"
+
+  defp possible_headline(0, chance), do: "A chance of rain right now (about #{chance}%)."
+  defp possible_headline(idx, _chance), do: dry_headline(idx)
+
+  defp summarize_raining([current | _] = series, horizon, rain?, probabilistic?) do
+    {rain, after_rain} = Enum.split_while(series, rain?)
     peak = Enum.max_by(rain, & &1.mm_h)
 
     base = %{
@@ -311,7 +376,7 @@ defmodule ZeroWeather.Nowcast do
 
         Map.merge(base, %{
           detail:
-            "Easing below #{@rain_threshold} mm/h at #{easing.time} (in #{minutes_text(ends_in)}), " <>
+            "#{easing_text(probabilistic?, easing.time, ends_in)}, " <>
               "peak #{fmt_rate(peak.mm_h)} mm/h.",
           ends_in_min: ends_in,
           ends_at: easing.time
@@ -319,7 +384,7 @@ defmodule ZeroWeather.Nowcast do
     end
   end
 
-  defp rain?(point), do: point.mm_h >= @rain_threshold
+  defp default_rain?(point), do: point.mm_h >= @rain_threshold
 
   defp dry_headline(1), do: "Dry for the next minute."
   defp dry_headline(n), do: "Dry for the next #{minutes_text(n)}."

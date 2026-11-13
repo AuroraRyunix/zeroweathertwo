@@ -265,7 +265,11 @@ defmodule ZeroWeather.RadarNowcastTest do
         )
 
       assert fc.summary.state == :rain_soon
-      assert fc.summary.starts_in_min in 33..47
+
+      # "likely" needs half of the (growing) smoothing disk to be wet, so it starts after the first edge (~47 min)
+      assert fc.summary.starts_in_min in 45..62
+      # ...but a real chance is mentioned earlier instead of claiming it stays dry until then
+      assert fc.summary.detail =~ "(a chance from"
       assert fc.summary.headline =~ "Dry for the next"
       assert fc.motion.known
       assert fc.motion.from == "W"
@@ -295,7 +299,10 @@ defmodule ZeroWeather.RadarNowcastTest do
 
       assert fc.motion.known == false
       assert fc.summary.state == :raining
-      assert fc.summary.ends_in_min == nil
+
+      # persistence is only ~55% reliable after an hour, so the confident "raining" ends in the second hour
+      assert fc.summary.ends_in_min in 55..95
+      assert fc.summary.detail =~ "Rain likely easing around"
     end
 
     test "the forecast is shorter for fast rain so it never looks beyond the window" do
@@ -315,6 +322,52 @@ defmodule ZeroWeather.RadarNowcastTest do
       assert %{time: <<_::binary-size(5)>>, mm_h: mm_h, chance: chance} = hd(fc.series)
       assert is_float(mm_h) and chance in 0..100
       assert %{"method" => "radar-advection"} = fc |> Jason.encode!() |> Jason.decode!()
+    end
+  end
+
+  describe "calibrated chance" do
+    test "is bounded, monotonic in the raw share and less confident further ahead" do
+      for tau <- [10, 30, 55, 90, 120] do
+        values = for raw <- 0..100//10, do: RadarNowcast.calibrate(raw, tau)
+        assert values == Enum.sort(values)
+        assert Enum.all?(values, &(&1 >= 0 and &1 <= 100))
+      end
+
+      assert RadarNowcast.calibrate(150, 10) == RadarNowcast.calibrate(100, 10)
+      assert RadarNowcast.calibrate(-5, 10) == RadarNowcast.calibrate(0, 10)
+
+      sure = for tau <- [10, 35, 55, 100], do: RadarNowcast.calibrate(100, tau)
+      assert sure == Enum.sort(sure, :desc)
+
+      # reality check from the replay: a raw 100% is ~98% right at +10 min, but only ~55% at +55 min
+      assert_in_delta RadarNowcast.calibrate(100, 10), 98, 1
+      assert_in_delta RadarNowcast.calibrate(100, 55), 55, 1
+    end
+
+    test "rain that only arrives late in the forecast is reported as possible, not certain" do
+      # 20 cells upwind at 0.2 cells/min: the shower core reaches the point after ~100 minutes
+      fc =
+        RadarNowcast.forecast(
+          model(blob(40.5, 60.5), %{dx: 2.0, dy: 0.0, quality: 0.9}),
+          DateTime.from_unix!(@frame_time)
+        )
+
+      assert fc.summary.state == :rain_possible
+      assert fc.summary.headline =~ "Dry for the next"
+      assert fc.summary.detail =~ "Rain possible from"
+      assert fc.summary.chance_pct in 25..49
+    end
+
+    test "series points report the rate where it rains, the calibrated chance and the raw share" do
+      fc =
+        RadarNowcast.forecast(
+          model(blob(60.5, 60.5), %{dx: 0.0, dy: 0.0, quality: 0.0}),
+          DateTime.from_unix!(@frame_time)
+        )
+
+      assert %{mm_h: rate, mean_mm_h: mean, chance: chance, chance_raw: raw} = hd(fc.series)
+      assert rate >= 1.5 and mean <= rate
+      assert raw == 100 and chance in 90..100
     end
   end
 end

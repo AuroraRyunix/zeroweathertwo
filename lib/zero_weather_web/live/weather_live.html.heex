@@ -39,7 +39,8 @@
             "px-3 py-1 rounded-full text-xs font-medium transition shrink-0 cursor-pointer",
             if(@active_location.id == loc.id,
               do: "bg-sky-500 text-white shadow-md shadow-sky-500/30",
-              else: "bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/50"
+              else:
+                "bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/50"
             )
           ]}
         >
@@ -59,7 +60,8 @@
     <!-- Hero Status Card -->
     <%= if @weather do %>
       <div class="p-6 sm:p-8 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-850 border border-slate-800 shadow-xl relative overflow-hidden">
-        <div class="absolute -right-12 -top-12 w-64 h-64 bg-sky-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute -right-12 -top-12 w-64 h-64 bg-sky-500/10 rounded-full blur-3xl pointer-events-none">
+        </div>
 
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
           <div>
@@ -74,7 +76,9 @@
             <div class="mt-3 flex items-center space-x-2">
               <span class="text-2xl">{@weather.current.condition_icon}</span>
               <p id="hero-summary" class="text-lg font-semibold text-sky-400">
-                {if @radar_nowcast, do: radar_hero_text(@radar_nowcast.summary), else: @weather.summary}
+                {if @radar_nowcast,
+                  do: radar_hero_text(@radar_nowcast.summary),
+                  else: @weather.summary}
               </p>
             </div>
           </div>
@@ -93,7 +97,9 @@
 
             <div class="px-4 py-2.5 rounded-xl bg-slate-800/80 border border-slate-700/60 text-xs">
               <div class="text-slate-400">Wind</div>
-              <div class="text-sm font-semibold text-white">{@weather.current.wind_speed} km/h</div>
+              <div class="text-sm font-semibold text-white">
+                {@weather.current.wind_speed} km/h
+              </div>
               <div class="text-slate-500">Dir: {@weather.current.wind_direction}°</div>
             </div>
 
@@ -103,7 +109,9 @@
                 <div class="text-sm font-semibold text-emerald-400">
                   {@weather.air_quality.eaqi || "--"} • {@weather.air_quality.label}
                 </div>
-                <div class="text-slate-500">PM2.5: {@weather.air_quality.pm2_5 || "--"} μg/m³</div>
+                <div class="text-slate-500">
+                  PM2.5: {@weather.air_quality.pm2_5 || "--"} μg/m³
+                </div>
               </div>
             <% end %>
           </div>
@@ -112,7 +120,10 @@
 
       <!-- Rain countdown: Buienradar 5-minute radar nowcast, interpolated to 1 minute -->
       <%= if @radar_nowcast do %>
-        <div id="radar-nowcast-card" class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl">
+        <div
+          id="radar-nowcast-card"
+          class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl"
+        >
           <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-4">
             <div>
               <h2 class="text-base font-bold text-white">⏱️ Rain countdown · next 2 hours</h2>
@@ -163,7 +174,7 @@
               <div class="flex-1 h-full flex items-end" title={nowcast_tooltip(point)}>
                 <div
                   class={["w-full rounded-t-sm", strip_color(point.mm_h)]}
-                  style={"height: #{strip_height(point.mm_h)}%"}
+                  style={"height: #{strip_height(point.mm_h)}%; opacity: #{strip_opacity(point)}"}
                 >
                 </div>
               </div>
@@ -190,7 +201,9 @@
             <h2 class="text-base font-bold text-white flex items-center space-x-2">
               <span>🌧️ Precipitation Nowcast (Next 3 Hours)</span>
             </h2>
-            <p class="text-xs text-slate-400 mt-0.5">High-resolution 15-minute expected rainfall and probability</p>
+            <p class="text-xs text-slate-400 mt-0.5">
+              High-resolution 15-minute expected rainfall and probability
+            </p>
           </div>
           <div class="flex items-center space-x-4 text-xs">
             <span class="flex items-center space-x-1.5 text-slate-400">
@@ -222,17 +235,16 @@
             <!-- Bars -->
             <div class="w-full h-full flex items-end justify-between gap-2">
               <%= for step <- @weather.timeline do %>
-                <%
-                  # Scale height: max 4.0 mm is 100% height
-                  height_pct = min(100, max(6, (step.precip_mm / 4.0) * 100))
-                  bar_color =
-                    cond do
-                      step.precip_mm <= 0.05 -> "bg-slate-800/60"
-                      step.precip_mm <= 1.0 -> "bg-sky-400"
-                      step.precip_mm <= 4.0 -> "bg-blue-500"
-                      true -> "bg-purple-600"
-                    end
-                %>
+                <% # Scale height: max 4.0 mm is 100% height
+                height_pct = min(100, max(6, step.precip_mm / 4.0 * 100))
+
+                bar_color =
+                  cond do
+                    step.precip_mm <= 0.05 -> "bg-slate-800/60"
+                    step.precip_mm <= 1.0 -> "bg-sky-400"
+                    step.precip_mm <= 4.0 -> "bg-blue-500"
+                    true -> "bg-purple-600"
+                  end %>
                 <div class="flex-1 flex flex-col items-center h-full justify-end group">
                   <!-- Rain probability tag if significant -->
                   <div class="text-[10px] text-sky-400 font-semibold mb-1 opacity-80">
@@ -277,7 +289,9 @@
           <h2 class="text-base font-bold text-white flex items-center space-x-2">
             <span>📡 Real-time Precipitation Radar Composite</span>
           </h2>
-          <p class="text-xs text-slate-400 mt-0.5">Live Doppler radar mosaic covering Belgium and borders</p>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Live Doppler radar mosaic covering Belgium and borders
+          </p>
         </div>
 
         <!-- Frame Time Indicator -->
@@ -370,7 +384,11 @@
   </main>
 
   <footer class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 text-center text-xs text-slate-600">
-    <p>ZeroWeather Belgium · Powered by Elixir & Phoenix LiveView · Built for VMware vSphere & Photon OS</p>
-    <p class="mt-1">Data sources: Buienradar 5-minute nowcast, RainViewer Radar, RMI Open Data, Open-Meteo DWD ICON-D2 & Copernicus Air Quality</p>
+    <p>
+      ZeroWeather Belgium · Powered by Elixir & Phoenix LiveView · Built for VMware vSphere & Photon OS
+    </p>
+    <p class="mt-1">
+      Data sources: Buienradar 5-minute nowcast, RainViewer Radar, RMI Open Data, Open-Meteo DWD ICON-D2 & Copernicus Air Quality
+    </p>
   </footer>
 </div>

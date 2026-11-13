@@ -278,7 +278,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
 
     case Map.get(point, :chance) do
       nil -> base
-      chance -> "#{base} · rain over #{chance}% of the surrounding area"
+      chance -> "#{base} · #{chance}% chance of rain nearby"
     end
   end
 
@@ -306,6 +306,12 @@ defmodule ZeroWeatherWeb.WeatherLive do
   # Square-root scale so light drizzle is still visible next to a downpour (5 mm/h = full height).
   def strip_height(mm_h) when mm_h < 0.05, do: 3
   def strip_height(mm_h), do: min(100, max(8, round(:math.sqrt(mm_h / 5.0) * 100)))
+
+  @doc "Bars fade with the chance of rain (own nowcast); Buienradar points carry no chance and stay solid."
+  def strip_opacity(%{chance: chance}) when is_number(chance),
+    do: Float.round(0.25 + 0.75 * min(max(chance, 0), 100) / 100, 2)
+
+  def strip_opacity(_point), do: 1.0
 
   def strip_color(mm_h) when mm_h < 0.05, do: "bg-slate-800/60"
   def strip_color(mm_h) when mm_h <= 1.0, do: "bg-sky-400"

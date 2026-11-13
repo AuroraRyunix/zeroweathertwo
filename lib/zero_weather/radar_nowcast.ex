@@ -28,6 +28,24 @@ defmodule ZeroWeather.RadarNowcast do
   @min_quality 0.45
   @rain_threshold 0.1
   @horizon_min 120
+  # smoothing disk radius in cells = base + lead_minutes * growth (the forecast gets less certain with lead time)
+  @smooth_base 0.8
+  @smooth_per_min 1 / 30
+
+  # The share of the smoothing disk that is raining is only a rough probability. Checked against 3,500 forecast/outcome
+  # pairs from a replay of real radar, it is well calibrated up to ~20 minutes ahead and increasingly overconfident
+  # after that (a raw 85-100% rained only ~55% of the time at +50..+60 min). These tables map the raw share (%) to the
+  # observed frequency (%) at three lead times; they are blended linearly in between.
+  @calibration [
+    {15, [{0, 1}, {10, 9}, {25, 22}, {42, 30}, {57, 60}, {75, 78}, {100, 98}]},
+    {35, [{0, 2}, {8, 10}, {25, 24}, {42, 38}, {57, 50}, {75, 64}, {100, 86}]},
+    {55, [{0, 4}, {8, 9}, {25, 15}, {42, 22}, {57, 33}, {75, 36}, {100, 55}]}
+  ]
+  # No data beyond an hour: assume confidence keeps shrinking, to 80% of the +55 min table at +120 min.
+  @late_shrink 0.2
+  # A minute counts as rain when it is at least this likely (percent); "possible" below that
+  @likely 50
+  @possible 25
   @model_ttl 900
   @max_frame_age 45 * 60
 
@@ -237,11 +255,23 @@ defmodule ZeroWeather.RadarNowcast do
 
   # -- advection forecast ------------------------------------------------------------------------------
 
-  @doc "Builds the 1-minute series and summary for `now` from a model (`grid`, `frame_time`, `motion`)."
+  @doc """
+  Builds the 1-minute series and summary for `now` from a model (`grid`, `frame_time`, `motion`).
+
+  Options (used to tune the forecast against hindcasts): `:smooth_base` and `:smooth_per_min` (radius of the
+  smoothing disk in cells = base + lead * per_min) and `:decay_min` (rain rate decays by `exp(-lead / decay_min)`).
+  """
+  def forecast(model, now, opts \\ [])
+
   def forecast(
         %{grid: grid, frame_time: frame_time, motion: motion, lat: lat, lon: lon},
-        %DateTime{} = now
+        %DateTime{} = now,
+        opts
       ) do
+    smooth_base = Keyword.get(opts, :smooth_base, @smooth_base)
+    smooth_rate = Keyword.get(opts, :smooth_per_min, @smooth_per_min)
+    decay_min = Keyword.get(opts, :decay_min)
+
     cell_km = grid.cell_km
     # drift in cells per minute
     vx = motion.dx / (@frame_seconds / 60)
@@ -262,14 +292,26 @@ defmodule ZeroWeather.RadarNowcast do
       for i <- 0..(max(max_lead, 1) - 1) do
         t = start + i * 60
         tau = (t - frame_time) / 60
-        {mm_h, chance} = sample_disk(grid, grid.cx - vx * tau, grid.cy - vy * tau, 0.8 + tau / 30)
+
+        {mean, raw_chance, rate_if_rain} =
+          sample_disk(
+            grid,
+            grid.cx - vx * tau,
+            grid.cy - vy * tau,
+            smooth_base + tau * smooth_rate
+          )
+
+        decay = if decay_min, do: :math.exp(-tau / decay_min), else: 1.0
         at = DateTime.from_unix!(t)
 
         %{
           at: DateTime.to_iso8601(at),
           time: Nowcast.local_time(at),
-          mm_h: Float.round(mm_h, 3),
-          chance: round(chance * 100)
+          # typical rate where it rains; the bar chart shows it with the chance as opacity
+          mm_h: Float.round(rate_if_rain * decay, 3),
+          mean_mm_h: Float.round(mean * decay, 3),
+          chance: round(calibrate(raw_chance * 100, tau)),
+          chance_raw: round(raw_chance * 100)
         }
       end
 
@@ -282,11 +324,61 @@ defmodule ZeroWeather.RadarNowcast do
       location: %{lat: lat, lon: lon},
       motion: describe_motion(motion, speed_km_h),
       series: series,
-      summary: Nowcast.summarize(series)
+      summary:
+        Nowcast.summarize(series,
+          rain?: &(&1.chance >= @likely),
+          possible?: &(&1.chance >= @possible)
+        )
     }
   end
 
-  # mean rain rate and the share of samples that are raining, over a disk of `radius` cells
+  @doc """
+  Calibrated probability of rain (percent) from the raw share of the smoothing disk that is raining (percent),
+  for a lead time in minutes since the radar frame. See the notes on `@calibration`.
+  """
+  def calibrate(raw_pct, tau_min) when is_number(raw_pct) and is_number(tau_min) do
+    raw = raw_pct |> max(0) |> min(100)
+    [{t0, tab0}, {t1, tab1}, {t2, tab2}] = @calibration
+
+    base =
+      cond do
+        tau_min <= t0 ->
+          interpolate_table(tab0, raw)
+
+        tau_min >= t2 ->
+          interpolate_table(tab2, raw)
+
+        tau_min <= t1 ->
+          blend(
+            interpolate_table(tab0, raw),
+            interpolate_table(tab1, raw),
+            (tau_min - t0) / (t1 - t0)
+          )
+
+        true ->
+          blend(
+            interpolate_table(tab1, raw),
+            interpolate_table(tab2, raw),
+            (tau_min - t1) / (t2 - t1)
+          )
+      end
+
+    late = if tau_min > t2, do: min(tau_min - t2, 65) / 65 * @late_shrink, else: 0.0
+    base * (1 - late)
+  end
+
+  defp blend(a, b, w), do: a + (b - a) * w
+
+  defp interpolate_table(table, x) do
+    [{x0, y0}, {x1, y1}] =
+      table
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.find(fn [{a, _}, {b, _}] -> x >= a and x <= b end)
+
+    y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+  end
+
+  # mean rain rate, share of the disk that is raining, and the mean rate over the raining samples only
   defp sample_disk(grid, x, y, radius) do
     r = ceil(radius)
 
@@ -297,7 +389,9 @@ defmodule ZeroWeather.RadarNowcast do
           do: RadarGrid.sample(grid, x + ox, y + oy)
 
     n = length(samples)
-    {Enum.sum(samples) / n, Enum.count(samples, &(&1 >= @rain_threshold)) / n}
+    wet = Enum.filter(samples, &(&1 >= @rain_threshold))
+    rate_if_rain = if wet == [], do: 0.0, else: Enum.sum(wet) / length(wet)
+    {Enum.sum(samples) / n, length(wet) / n, rate_if_rain}
   end
 
   defp describe_motion(%{quality: quality} = motion, speed_km_h) do
