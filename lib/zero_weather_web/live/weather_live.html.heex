@@ -142,6 +142,19 @@
                 Radar frame {local_clock(@radar_nowcast.frame_time)}, {@radar_nowcast.frame_age_min} min old;
                 recomputed every minute
               </dd>
+              <%= if @gauge do %>
+                <dt>Ground station</dt>
+                <dd id="radar-nowcast-gauge">
+                  {@gauge.station} ({@gauge.distance_km} km, {local_clock(@gauge.time)}): {@gauge.precip_mm_10min} mm in 10 min, {@gauge.precip_mm_hour} mm in the last hour; {@gauge.temperature}°C, humidity {round(
+                    @gauge.humidity || 0
+                  )}%,
+                  dew point {@gauge.dew_point}°C (depression {@gauge.depression}°C).
+                  <%= if virga_risk?(@gauge) do %>
+                    Very dry air near the ground: light radar echoes may evaporate before they reach it.
+                  <% end %>
+                  <span class="zw-muted">Shown for reference; not used to correct the forecast yet.</span>
+                </dd>
+              <% end %>
               <%= if @buienradar do %>
                 <dt>Cross-check</dt>
                 <dd id="radar-nowcast-crosscheck">

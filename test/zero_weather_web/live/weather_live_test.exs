@@ -233,4 +233,27 @@ defmodule ZeroWeatherWeb.WeatherLiveTest do
     refute plain.has_chance
     assert plain.line == nil
   end
+
+  test "shows the nearest ground station next to the tracking data", %{conn: conn} do
+    {:ok, records} =
+      ZeroWeather.Gauges.parse([
+        %{
+          "properties" => %{
+            "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
+            "precip_quantity" => 0.2,
+            "temp_dry_shelter_avg" => 6.3,
+            "humidity_rel_shelter_avg" => 82.0
+          }
+        }
+      ])
+
+    Cache.put({:gauge_records, 6434}, records, 120)
+    {:ok, view, _html} = live(conn, ~p"/")
+    render_async(view)
+
+    assert has_element?(view, "#radar-nowcast-gauge", "Melle")
+    assert has_element?(view, "#radar-nowcast-gauge", "0.2 mm in 10 min")
+    assert has_element?(view, "#radar-nowcast-gauge", "dew point")
+    refute has_element?(view, "#radar-nowcast-gauge", "evaporate")
+  end
 end

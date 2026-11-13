@@ -1,7 +1,7 @@
 defmodule ZeroWeatherWeb.WeatherLive do
   use ZeroWeatherWeb, :live_view
 
-  alias ZeroWeather.{Weather, Radar, Locations, Nowcast, RadarNowcast}
+  alias ZeroWeather.{Weather, Radar, Locations, Nowcast, RadarNowcast, Gauges}
 
   # 3 minutes
   @refresh_interval 180_000
@@ -53,6 +53,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
       |> assign(:own_nowcast, nil)
       |> assign(:own_loading, connected?(socket))
       |> assign(:own_error, nil)
+      |> assign(:gauge, nil)
       |> pick_nowcast()
       |> start_own_nowcast(default_loc)
       |> assign(:radar_meta, radar_meta)
@@ -174,7 +175,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
 
   # Result of our own radar nowcast (computed off the LiveView process: it may need to fetch radar tiles).
   @impl true
-  def handle_async(:own_nowcast, {:ok, {key, result}}, socket) do
+  def handle_async(:own_nowcast, {:ok, {key, result, gauge}}, socket) do
     loc = socket.assigns.active_location
 
     if key != {loc.lat, loc.lon} do
@@ -193,6 +194,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
        socket
        |> assign(:own_nowcast, own)
        |> assign(:own_error, if(is_binary(error), do: error))
+       |> assign(:gauge, with({:ok, g} <- gauge, do: g, else: (_ -> nil)))
        |> assign(:own_loading, false)
        |> pick_nowcast()
        |> refresh_frames()}
@@ -332,7 +334,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
   defp start_own_nowcast(socket, loc) do
     if connected?(socket) do
       start_async(socket, :own_nowcast, fn ->
-        {{loc.lat, loc.lon}, RadarNowcast.get(loc.lat, loc.lon)}
+        {{loc.lat, loc.lon}, RadarNowcast.get(loc.lat, loc.lon), Gauges.latest(loc.lat, loc.lon)}
       end)
     else
       socket
@@ -352,6 +354,9 @@ defmodule ZeroWeatherWeb.WeatherLive do
   @doc "True for our own radar-advection nowcast (as opposed to the Buienradar feed)."
   def own?(%{method: "radar-advection"}), do: true
   def own?(_), do: false
+
+  @doc "True when the ground station reports air dry enough that light rain evaporates before it lands."
+  def virga_risk?(gauge), do: Gauges.virga_risk?(gauge)
 
   @doc "One sentence about the estimated drift of the rain."
   def motion_text(%{known: true, speed_km_h: speed, from: from}) when speed >= 1.0,
