@@ -4,7 +4,7 @@ defmodule ZeroWeather.RadarGrid do
 
   The tiles are rendered with RainViewer's fixed "Universal Blue" palette; `ZeroWeather.RadarColors` inverts their
   published dBZ table, so every pixel becomes a real reflectivity and then a rain rate (Marshall-Palmer). Pixels are
-  averaged into cells of `@downsample` x `@downsample` pixels (about 1.5 km at Belgian latitudes) with
+  averaged into cells of `@downsample` x `@downsample` pixels (about 0.75 km at Belgian latitudes) with
   `ZeroWeather.Png`. Decoded tiles are cached, so every viewer shares them.
 
   Coordinates: everything lives in the Web-Mercator *cell grid* at zoom `@zoom`
@@ -15,7 +15,7 @@ defmodule ZeroWeather.RadarGrid do
 
   @zoom 7
   @tile_px 512
-  @downsample 4
+  @downsample 2
   @cells_per_tile div(@tile_px, @downsample)
   @world_px 65_536
   @tile_ttl 2_700
@@ -102,6 +102,36 @@ defmodule ZeroWeather.RadarGrid do
 
       for sum <- sums, into: <<>>, do: <<min(round(sum / area * 100), 65_535)::16>>
     end
+  end
+
+  @doc """
+  Averages 2x2 cells of a window into one (cells twice as large). Used to track motion, which does not need the
+  full resolution and would be 16 times more expensive on it.
+  """
+  def coarsen(%{n: n, rows: rows} = grid) do
+    m = div(n, 2)
+
+    coarse =
+      for j <- 0..(m - 1) do
+        top = elem(rows, 2 * j)
+        bottom = elem(rows, 2 * j + 1)
+
+        List.to_tuple(
+          for i <- 0..(m - 1) do
+            (elem(top, 2 * i) + elem(top, 2 * i + 1) + elem(bottom, 2 * i) +
+               elem(bottom, 2 * i + 1)) / 4
+          end
+        )
+      end
+
+    %{
+      grid
+      | n: m,
+        cx: grid.cx / 2,
+        cy: grid.cy / 2,
+        cell_km: grid.cell_km * 2,
+        rows: List.to_tuple(coarse)
+    }
   end
 
   # -- window around a point -----------------------------------------------------------------

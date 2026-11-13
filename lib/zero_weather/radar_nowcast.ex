@@ -3,7 +3,7 @@ defmodule ZeroWeather.RadarNowcast do
   Our own rain nowcast, computed from the radar frames themselves.
 
   1. The newest radar frames (RainViewer, one every 10 minutes) are decoded into a rain-rate grid of about
-     1.5 km cells around the point (`ZeroWeather.RadarGrid`).
+     0.75 km cells around the point (`ZeroWeather.RadarGrid`).
   2. The rain's **drift** is estimated by finding the shift that best maps the previous frame onto the newest one
      (normalised cross-correlation over the rain cells near the point, with sub-cell refinement; two frame pairs are
      combined when they agree).
@@ -17,8 +17,9 @@ defmodule ZeroWeather.RadarNowcast do
 
   alias ZeroWeather.{Cache, Nowcast, Radar, RadarGrid}
 
-  # window half size in cells (~150 km): enough upstream distance for 2 hours at ~65 km/h
-  @half 100
+  # window half size in (0.75 km) cells (~150 km): enough upstream distance for 2 hours at ~65 km/h
+  @half 200
+  # Motion is tracked on a 2x2-averaged copy of the grids (1.5 km cells); these constants are in those cells
   # cells around the point used to track the motion (~70 km)
   @motion_half 45
   # largest shift searched per frame step, in cells (~18 km per 10 min = 108 km/h)
@@ -28,9 +29,10 @@ defmodule ZeroWeather.RadarNowcast do
   @min_quality 0.45
   @rain_threshold 0.1
   @horizon_min 120
-  # smoothing disk radius in cells = base + lead_minutes * growth (the forecast gets less certain with lead time)
-  @smooth_base 0.8
-  @smooth_per_min 1 / 30
+  # smoothing disk radius in km = base + lead_minutes * growth (the forecast gets less certain with lead time);
+  # kept in km so the calibration below holds whatever the cell size
+  @smooth_base_km 1.2
+  @smooth_per_min_km 0.05
 
   # The share of the smoothing disk that is raining is only a rough probability. Checked against 3,500 forecast/outcome
   # pairs from a replay of real radar, it is well calibrated up to ~20 minutes ahead and increasingly overconfident
@@ -117,18 +119,22 @@ defmodule ZeroWeather.RadarNowcast do
         {:error, reason}
 
       nil ->
-        [{_, g0} | older] = grids
+        [{_, g0} | _older] = grids
 
         {:ok,
          %{
            grid: g0,
            frame_time: newest.time,
-           motion: estimate_motion_chain([g0 | Enum.map(older, &elem(&1, 1))]),
+           motion:
+             fine_motion(estimate_motion_chain(Enum.map(grids, &RadarGrid.coarsen(elem(&1, 1))))),
            lat: lat,
            lon: lon
          }}
     end
   end
+
+  # motion was found in coarse (2x2) cells: express the shift in the full-resolution cells of the model grid
+  defp fine_motion(%{dx: dx, dy: dy} = motion), do: %{motion | dx: dx * 2, dy: dy * 2}
 
   # -- motion estimation -------------------------------------------------------------------------
 
@@ -268,11 +274,13 @@ defmodule ZeroWeather.RadarNowcast do
         %DateTime{} = now,
         opts
       ) do
-    smooth_base = Keyword.get(opts, :smooth_base, @smooth_base)
-    smooth_rate = Keyword.get(opts, :smooth_per_min, @smooth_per_min)
+    cell_km = grid.cell_km
+
+    # options are in cells of a 1.5 km grid (as in the hindcast scripts); the disk is defined in km
+    smooth_base = Keyword.get(opts, :smooth_base, @smooth_base_km / 1.5) * 1.5 / cell_km
+    smooth_rate = Keyword.get(opts, :smooth_per_min, @smooth_per_min_km / 1.5) * 1.5 / cell_km
     decay_min = Keyword.get(opts, :decay_min)
 
-    cell_km = grid.cell_km
     # drift in cells per minute
     vx = motion.dx / (@frame_seconds / 60)
     vy = motion.dy / (@frame_seconds / 60)
@@ -284,7 +292,7 @@ defmodule ZeroWeather.RadarNowcast do
     max_lead =
       if speed_km_h < 1.0,
         do: @horizon_min,
-        else: min(@horizon_min, trunc(@half * cell_km * 0.9 / (speed_km_h / 60)))
+        else: min(@horizon_min, trunc(div(grid.n, 2) * cell_km * 0.9 / (speed_km_h / 60)))
 
     start = div(DateTime.to_unix(now), 60) * 60
 

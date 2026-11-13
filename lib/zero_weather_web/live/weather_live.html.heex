@@ -201,14 +201,14 @@
           <div>
             <h2 class="text-base font-bold text-white flex items-center space-x-2">
               <span>
-                🌧️ Precipitation Nowcast ({if chart_source == :five_minute,
+                🌧️ Precipitation Nowcast ({if chart_source == :one_minute,
                   do: "Next 2 Hours",
                   else: "Next 3 Hours"})
               </span>
             </h2>
             <p class="text-xs text-slate-400 mt-0.5">
-              {if chart_source == :five_minute,
-                do: "5-minute expected rain rate and chance, from our own radar nowcast",
+              {if chart_source == :one_minute,
+                do: "1-minute expected rain rate and chance, from our own radar nowcast",
                 else: "15-minute expected rainfall and probability (Open-Meteo)"}
             </p>
           </div>
@@ -240,7 +240,7 @@
             </div>
 
             <!-- Bars -->
-            <div class="w-full h-full flex items-end justify-between gap-1">
+            <div class="w-full h-full flex items-end justify-between gap-px">
               <%= for step <- chart_steps do %>
                 <% # Scale height: max 4.0 mm is 100% height
                 height_pct = min(100, max(6, step.precip_mm / 4.0 * 100))
@@ -255,7 +255,7 @@
                 <div class="flex-1 flex flex-col items-center h-full justify-end group">
                   <!-- Rain probability tag if significant -->
                   <div class="text-[10px] text-sky-400 font-semibold mb-1 opacity-80">
-                    <%= if step.probability > 10 and (chart_source == :fifteen_minute or rem(Enum.find_index(chart_steps, &(&1 == step)), 3) == 0) do %>
+                    <%= if step.probability > 10 and (chart_source == :fifteen_minute or step.show_prob) do %>
                       {step.probability}%
                     <% else %>
                       &nbsp;

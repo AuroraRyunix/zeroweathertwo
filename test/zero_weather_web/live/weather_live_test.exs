@@ -198,18 +198,20 @@ defmodule ZeroWeatherWeb.WeatherLiveTest do
     html = render_async(view)
 
     assert html =~ "Precipitation Nowcast (Next 2 Hours)"
-    assert html =~ "5-minute expected rain rate"
+    assert html =~ "1-minute expected rain rate"
     refute html =~ "15-minute expected rainfall"
   end
 
-  test "chart steps: 24 five-minute bars, or the 15-minute timeline as fallback" do
+  test "chart steps: 120 one-minute bars, or the 15-minute timeline as fallback" do
     series =
       for m <- 0..119,
           do: %{time: "12:#{m}", mm_h: 2.0, mean_mm_h: 1.0, chance: if(m < 5, do: 80, else: 5)}
 
-    {:five_minute, steps} = ZeroWeatherWeb.WeatherLive.chart_steps(%{series: series}, [])
-    assert length(steps) == 24
-    assert hd(steps).probability == 80 and hd(steps).precip_mm == 1.0
+    {:one_minute, steps} = ZeroWeatherWeb.WeatherLive.chart_steps(%{series: series}, [])
+    assert length(steps) == 120
+
+    assert hd(steps).probability == 80 and hd(steps).precip_mm == 1.0 and
+             hd(steps).label == "12:0"
 
     assert {:fifteen_minute, [%{label: "12:00"}]} =
              ZeroWeatherWeb.WeatherLive.chart_steps(nil, [%{time: "12:00"}])

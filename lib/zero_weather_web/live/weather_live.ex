@@ -366,30 +366,24 @@ defmodule ZeroWeatherWeb.WeatherLive do
   def radar_hero_text(%{headline: headline, detail: detail}), do: "#{headline} #{detail}"
 
   @doc """
-  Bars of the precipitation chart: 5-minute steps of our radar nowcast (expected rate and chance), or the
+  Bars of the precipitation chart: the 1-minute steps of our radar nowcast (expected rate and chance), or the
   Open-Meteo 15-minute timeline when no radar nowcast is available. Returns `{source, steps}`.
   """
   def chart_steps(%{series: [_ | _] = series}, _timeline) do
     steps =
       series
-      |> Enum.chunk_every(5)
       |> Enum.with_index()
-      |> Enum.map(fn {chunk, i} ->
-        rate =
-          chunk
-          |> Enum.map(&(Map.get(&1, :mean_mm_h) || &1.mm_h))
-          |> Enum.sum()
-          |> Kernel./(length(chunk))
-
+      |> Enum.map(fn {point, i} ->
         %{
-          time: hd(chunk).time,
-          label: if(rem(i, 3) == 0, do: hd(chunk).time, else: ""),
-          precip_mm: Float.round(rate * 1.0, 2),
-          probability: chunk |> Enum.map(&Map.get(&1, :chance, 0)) |> Enum.max()
+          time: point.time,
+          label: if(rem(i, 15) == 0, do: point.time, else: ""),
+          show_prob: rem(i, 10) == 0,
+          precip_mm: Float.round((Map.get(point, :mean_mm_h) || point.mm_h) * 1.0, 2),
+          probability: Map.get(point, :chance, 0)
         }
       end)
 
-    {:five_minute, steps}
+    {:one_minute, steps}
   end
 
   def chart_steps(_nowcast, timeline) do

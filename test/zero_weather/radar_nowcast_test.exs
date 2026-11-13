@@ -135,31 +135,52 @@ defmodule ZeroWeather.RadarNowcastTest do
   end
 
   describe "RadarGrid" do
-    test "geometry: Ghent is in zoom-7 tile 65/42 and cells are about 1.5 km" do
+    test "geometry: Ghent is in zoom-7 tile 65/42 and cells are about 0.77 km" do
       {px, py} = RadarGrid.world_px(51.0543, 3.7174)
       assert {trunc(px / 512), trunc(py / 512)} == {65, 42}
-      assert_in_delta RadarGrid.cell_km(51.05), 1.54, 0.03
+      assert_in_delta RadarGrid.cell_km(51.05), 0.77, 0.02
     end
 
     test "downsample averages pixel rain rates into cells (units of 0.01 mm/h)" do
       echo = <<127, 191, 255, 255>>
       none = <<0, 0, 0, 0>>
 
-      # top-left 4x4 pixels (= cell 0,0) fully raining, the cell next to it half raining (left half of the 4x4 block)
+      # top-left 2x2 pixels (= cell 0,0) fully raining, the cell next to it half raining (left column of its 2x2 block)
       rgba =
         for y <- 0..511, x <- 0..511, into: <<>> do
           cond do
-            y < 4 and x < 4 -> echo
-            y < 4 and x >= 4 and x < 6 -> echo
+            y < 2 and x < 2 -> echo
+            y < 2 and x == 2 -> echo
             true -> none
           end
         end
 
       cells = RadarGrid.downsample(%{width: 512, height: 512, rgba: rgba})
       <<c00::16, c10::16, _::binary>> = cells
-      assert byte_size(cells) == 128 * 128 * 2
+      assert byte_size(cells) == 256 * 256 * 2
       assert_in_delta c00, 65, 2
       assert_in_delta c10, 32, 2
+    end
+
+    test "coarsen averages 2x2 cells and doubles the cell size" do
+      rows =
+        for y <- 0..4,
+            do: List.to_tuple(for x <- 0..4, do: if(x < 2 and y < 2, do: 4.0, else: 0.0))
+
+      grid = %{
+        n: 5,
+        cx: 2.5,
+        cy: 2.5,
+        cell_km: 0.75,
+        lat: 51.0,
+        lon: 3.0,
+        rows: List.to_tuple(rows)
+      }
+
+      c = RadarGrid.coarsen(grid)
+      assert c.n == 2 and c.cell_km == 1.5 and c.cx == 1.25
+      assert RadarGrid.cell(c, 0, 0) == 4.0
+      assert RadarGrid.cell(c, 1, 0) == 0.0
     end
 
     test "window assembles cached tiles and locate/sample find the point again" do
@@ -169,10 +190,10 @@ defmodule ZeroWeather.RadarNowcastTest do
       path = "/v2/radar/test-window"
       # one cell with 3.0 mm/h at tile 65/42, cell (30, 60); every other tile cell is dry
       {px, py} = RadarGrid.world_px(lat, lon)
-      cell_x = trunc(px / 4) - 65 * 128
-      cell_y = trunc(py / 4) - 42 * 128
-      dry = :binary.copy(<<0, 0>>, 128 * 128)
-      offset = (cell_y * 128 + cell_x) * 2
+      cell_x = trunc(px / 2) - 65 * 256
+      cell_y = trunc(py / 2) - 42 * 256
+      dry = :binary.copy(<<0, 0>>, 256 * 256)
+      offset = (cell_y * 256 + cell_x) * 2
 
       wet =
         binary_part(dry, 0, offset) <>
