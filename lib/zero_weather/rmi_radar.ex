@@ -16,29 +16,44 @@ defmodule ZeroWeather.RmiRadar do
   @frame_ttl 3_600
   @latest_ttl 30
   @failure_ttl 20
+  # after an upstream failure, leave RMI alone for a while instead of retrying on every page refresh
+  @down_ttl 90
 
   @doc "Unix time of the newest composite (cached 30 s)."
   def latest_time do
-    Cache.fetch(:rmi_latest, @latest_ttl, fn ->
-      with {:ok, %{status: 200, body: body}} <-
-             Req.get(@wcs,
-               params: [
-                 service: "WCS",
-                 version: "2.0.1",
-                 request: "DescribeCoverage",
-                 coverageId: @coverage
-               ],
-               receive_timeout: 8_000,
-               retry: false,
-               decode_body: false
-             ),
-           {:ok, unix} <- parse_end_position(body) do
-        {:ok, unix}
-      else
-        {:ok, %{status: status}} -> {:error, {:rmi_http_status, status}}
-        {:error, reason} -> {:error, {:rmi_unreachable, reason}}
-      end
-    end)
+    case Cache.get(:rmi_down) do
+      {:ok, reason} -> {:error, {:rmi_backing_off, reason}}
+      :error -> fetch_latest_time()
+    end
+  end
+
+  defp fetch_latest_time do
+    result =
+      Cache.fetch(:rmi_latest, @latest_ttl, fn ->
+        with {:ok, %{status: 200, body: body}} <-
+               Req.get(@wcs,
+                 params: [
+                   service: "WCS",
+                   version: "2.0.1",
+                   request: "DescribeCoverage",
+                   coverageId: @coverage
+                 ],
+                 receive_timeout: 8_000,
+                 retry: false,
+                 decode_body: false
+               ),
+             {:ok, unix} <- parse_end_position(body) do
+          {:ok, unix}
+        else
+          {:ok, %{status: status}} -> {:error, {:rmi_http_status, status}}
+          {:error, reason} -> {:error, {:rmi_unreachable, reason}}
+        end
+      end)
+
+    with {:error, reason} <- result do
+      Cache.put(:rmi_down, reason, @down_ttl)
+      {:error, reason}
+    end
   end
 
   @doc false

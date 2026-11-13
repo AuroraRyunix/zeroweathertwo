@@ -119,26 +119,31 @@ defmodule ZeroWeather.RadarNowcast do
         {:error, reason}
 
       nil ->
-        [{:ok, newest_frame} | _] = frames
+        model_from_rasters(for({:ok, f} <- frames, do: f), lat, lon)
+    end
+  end
 
-        if RmiRadar.covers?(newest_frame, lat, lon, @rmi_margin_deg) do
-          grids =
-            for {:ok, f} <- frames, do: RmiRadar.window(f, lat, lon, @rmi_half, @rmi_cell_km)
+  @doc """
+  Model (grid + motion) from decoded RMI composites, newest first (the newest plus the frames 10 and 20 minutes
+  earlier). Also used by the hindcast scripts.
+  """
+  def model_from_rasters([newest_frame | _] = rasters, lat, lon) do
+    if RmiRadar.covers?(newest_frame, lat, lon, @rmi_margin_deg) do
+      grids = for f <- rasters, do: RmiRadar.window(f, lat, lon, @rmi_half, @rmi_cell_km)
 
-          {:ok,
-           %{
-             grid: hd(grids),
-             frame_time: newest,
-             motion:
-               grids |> Enum.map(&RadarGrid.coarsen/1) |> estimate_motion_chain() |> fine_motion(),
-             lat: lat,
-             lon: lon,
-             radar_source: :rmi,
-             source: "RMI radar composite (5-minute float rain rate), own advection nowcast"
-           }}
-        else
-          {:error, :outside_rmi_coverage}
-        end
+      {:ok,
+       %{
+         grid: hd(grids),
+         frame_time: newest_frame.time,
+         motion:
+           grids |> Enum.map(&RadarGrid.coarsen/1) |> estimate_motion_chain() |> fine_motion(),
+         lat: lat,
+         lon: lon,
+         radar_source: :rmi,
+         source: "RMI radar composite (5-minute float rain rate), own advection nowcast"
+       }}
+    else
+      {:error, :outside_rmi_coverage}
     end
   end
 

@@ -68,5 +68,11 @@ defmodule ZeroWeather.RmiRadarTest do
       assert RmiRadar.parse_end_position(xml) == {:ok, 1_794_587_400}
       assert RmiRadar.parse_end_position("<x/>") == {:error, :no_time_axis}
     end
+
+    test "backs off after a failure instead of asking RMI again" do
+      ZeroWeather.Cache.put(:rmi_down, {:rmi_http_status, 500}, 60)
+      assert {:error, {:rmi_backing_off, {:rmi_http_status, 500}}} = RmiRadar.latest_time()
+      ZeroWeather.Cache.put(:rmi_down, nil, 0)
+    end
   end
 end
