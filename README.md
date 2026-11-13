@@ -8,11 +8,13 @@ Written in **100% Elixir & Phoenix LiveView**, running on **Bandit**, with an in
 
 ## 🌟 Key Features
 
-- **🌧️ Rain Countdown (5-minute radar, 1-minute resolution):**
-  - Point nowcast from Buienradar's radar feed (24 steps of 5 minutes, about 2 hours), converted to mm/h with `10^((PPP-109)/32)` and linearly interpolated to a continuous **1-minute timeline**.
-  - Live countdown that updates every minute: *"Dry for the next 46 minutes. Rain starting at 14:48, lasting 8 minutes, peak 0.2 mm/h."* or *"Raining now (0.5 mm/h). Easing below 0.1 mm/h at 14:20 (in 13 minutes)."*
-  - The feed is re-polled every minute (cached 55 s and shared by all viewers). The raw feed carries only a local clock time; DST for the Belgian clock is handled in `ZeroWeather.Nowcast` (no timezone database needed).
-  - Also returned as `radar_nowcast` by `GET /api/v1/nowcast`.
+- **🌧️ Own Rain Nowcast with a Live Countdown (radar advection, 1-minute resolution):**
+  - We compute the nowcast ourselves from the radar frames (RainViewer, one every 10 minutes): tiles are decoded with a pure-Elixir PNG decoder and RainViewer's published Universal Blue dBZ table, converted to rain rate (Marshall-Palmer) and averaged into ~1.5 km cells (`ZeroWeather.RadarGrid`).
+  - The rain's **drift** is estimated by normalised cross-correlation between the newest frame and the previous ones (sub-cell refinement, two frame pairs combined); the newest frame is then **advected** along that drift to the chosen point, sampled once per minute over a disk that grows with lead time (`ZeroWeather.RadarNowcast`).
+  - Live countdown that updates every minute: *"Dry for the next 46 minutes. Rain starting at 14:48, lasting 8 minutes, peak 0.2 mm/h."*, plus the estimated drift (*"Rain is drifting from the NW at 26 km/h"*).
+  - Buienradar's finished 5-minute point forecast (`ZeroWeather.Nowcast`) is shown as a cross-check and is the instant fallback while the radar nowcast is computed, or if the radar tiles are unavailable.
+  - Skill check (hindcast over 2 hours of real radar, rain near the point, `CSI` = hits / (hits + misses + false alarms)): 0.77 at +10 min, 0.44 at +30 min, 0.31 at +60 min, against 0.39 / 0.05 / 0.04 for "rain stays where it is". Intensity is not grown or decayed, so skill drops with lead time; the sample is small and mostly light rain.
+  - Also returned by `GET /api/v1/nowcast` as `radar_nowcast` (own) and `buienradar_nowcast` (cross-check).
 - **⏱️ 15-Minute Rain Nowcast Timeline:**
   - High-resolution precipitation forecasts in 15-minute intervals for the next 3 hours.
   - Custom SVG rain bar chart with intensity color coding (Light $<1$ mm/h, Moderate $1-4$ mm/h, Heavy $>4$ mm/h).

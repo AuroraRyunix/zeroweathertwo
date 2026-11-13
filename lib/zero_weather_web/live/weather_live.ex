@@ -1,7 +1,7 @@
 defmodule ZeroWeatherWeb.WeatherLive do
   use ZeroWeatherWeb, :live_view
 
-  alias ZeroWeather.{Weather, Radar, Locations, Nowcast}
+  alias ZeroWeather.{Weather, Radar, Locations, Nowcast, RadarNowcast}
 
   # 3 minutes
   @refresh_interval 180_000
@@ -49,7 +49,11 @@ defmodule ZeroWeatherWeb.WeatherLive do
       |> assign(:locations, locations)
       |> assign(:active_location, default_loc)
       |> assign(:weather, weather)
-      |> assign(:radar_nowcast, fetch_radar_nowcast(default_loc, nil))
+      |> assign(:buienradar, fetch_buienradar(default_loc, nil))
+      |> assign(:own_nowcast, nil)
+      |> assign(:own_loading, connected?(socket))
+      |> pick_nowcast()
+      |> start_own_nowcast(default_loc)
       |> assign(:radar_meta, radar_meta)
       |> assign(:frames, frames)
       |> assign(:active_frame_index, active_frame_idx)
@@ -158,8 +162,40 @@ defmodule ZeroWeatherWeb.WeatherLive do
     loc = socket.assigns.active_location
     schedule_nowcast_tick()
 
+    socket =
+      socket
+      |> assign(:buienradar, fetch_buienradar(loc, socket.assigns.buienradar))
+      |> pick_nowcast()
+      |> start_own_nowcast(loc)
+
+    {:noreply, socket}
+  end
+
+  # Result of our own radar nowcast (computed off the LiveView process: it may need to fetch radar tiles).
+  @impl true
+  def handle_async(:own_nowcast, {:ok, {key, result}}, socket) do
+    loc = socket.assigns.active_location
+
+    if key != {loc.lat, loc.lon} do
+      # a result for a location we have already left
+      {:noreply, socket}
+    else
+      own =
+        case result do
+          {:ok, own} -> own
+          {:error, _reason} -> keep_if_recent(socket.assigns.own_nowcast)
+        end
+
+      {:noreply,
+       socket |> assign(:own_nowcast, own) |> assign(:own_loading, false) |> pick_nowcast()}
+    end
+  end
+
+  def handle_async(:own_nowcast, {:exit, _reason}, socket) do
+    own = keep_if_recent(socket.assigns.own_nowcast)
+
     {:noreply,
-     assign(socket, :radar_nowcast, fetch_radar_nowcast(loc, socket.assigns.radar_nowcast))}
+     socket |> assign(:own_nowcast, own) |> assign(:own_loading, false) |> pick_nowcast()}
   end
 
   defp load_location(socket, loc) do
@@ -169,7 +205,11 @@ defmodule ZeroWeatherWeb.WeatherLive do
           socket
           |> assign(:active_location, loc)
           |> assign(:weather, weather)
-          |> assign(:radar_nowcast, fetch_radar_nowcast(loc, nil))
+          |> assign(:buienradar, fetch_buienradar(loc, nil))
+          |> assign(:own_nowcast, nil)
+          |> assign(:own_loading, true)
+          |> pick_nowcast()
+          |> start_own_nowcast(loc)
           |> assign(:page_title, "#{loc.name} · Real-time Nowcast")
           |> assign(:error_message, nil)
           |> push_event("pan-location", %{lat: loc.lat, lon: loc.lon, name: loc.name})
@@ -194,13 +234,62 @@ defmodule ZeroWeatherWeb.WeatherLive do
     )
   end
 
-  # Keeps the previous nowcast when the feed is briefly unavailable.
-  defp fetch_radar_nowcast(loc, fallback) do
+  # Buienradar's finished point forecast: instant, used as fallback and as a cross-check.
+  # Keeps the previous result when the feed is briefly unavailable.
+  defp fetch_buienradar(loc, fallback) do
     case Nowcast.get(loc.lat, loc.lon) do
       {:ok, nowcast} -> nowcast
       _ -> fallback
     end
   end
+
+  # Our own radar nowcast is the primary source; Buienradar fills in until it is ready (or if it fails).
+  defp pick_nowcast(socket) do
+    assign(socket, :radar_nowcast, socket.assigns.own_nowcast || socket.assigns.buienradar)
+  end
+
+  defp start_own_nowcast(socket, loc) do
+    if connected?(socket) do
+      start_async(socket, :own_nowcast, fn ->
+        {{loc.lat, loc.lon}, RadarNowcast.get(loc.lat, loc.lon)}
+      end)
+    else
+      socket
+    end
+  end
+
+  # After a failed update keep the last own result for a short while, then fall back to Buienradar.
+  defp keep_if_recent(nil), do: nil
+
+  defp keep_if_recent(%{generated_at: generated_at} = own) do
+    case DateTime.from_iso8601(generated_at) do
+      {:ok, dt, _} -> if DateTime.diff(DateTime.utc_now(), dt) < 180, do: own, else: nil
+      _ -> nil
+    end
+  end
+
+  @doc "True for our own radar-advection nowcast (as opposed to the Buienradar feed)."
+  def own?(%{method: "radar-advection"}), do: true
+  def own?(_), do: false
+
+  @doc "Tooltip text of one minute of the strip."
+  def nowcast_tooltip(point) do
+    base = "#{point.time} · #{point.mm_h} mm/h"
+
+    case Map.get(point, :chance) do
+      nil -> base
+      chance -> "#{base} · rain over #{chance}% of the surrounding area"
+    end
+  end
+
+  @doc "One sentence about the estimated drift of the rain."
+  def motion_text(%{known: true, speed_km_h: speed, from: from}) when speed >= 1.0,
+    do: "🧭 Rain is drifting from the #{from} at #{speed} km/h"
+
+  def motion_text(%{known: true}), do: "🧭 Rain is almost stationary"
+
+  def motion_text(_),
+    do: "🧭 Drift unknown (too little rain nearby to track), so rain is assumed to stay put"
 
   @doc "One-line version of the countdown for the hero card."
   def radar_hero_text(%{headline: headline, detail: nil}), do: headline

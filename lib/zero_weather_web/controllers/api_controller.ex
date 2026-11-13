@@ -1,7 +1,7 @@
 defmodule ZeroWeatherWeb.ApiController do
   use ZeroWeatherWeb, :controller
 
-  alias ZeroWeather.{Weather, Radar, Locations, Nowcast}
+  alias ZeroWeather.{Weather, Radar, Locations, Nowcast, RadarNowcast}
 
   def health(conn, _params) do
     json(conn, %{
@@ -49,7 +49,12 @@ defmodule ZeroWeatherWeb.ApiController do
   defp serve_forecast(conn, lat, lon) do
     case Weather.get_nowcast(lat, lon) do
       {:ok, data} ->
-        json(conn, Map.put(data, :radar_nowcast, radar_nowcast(lat, lon)))
+        data =
+          data
+          |> Map.put(:radar_nowcast, own_nowcast(lat, lon))
+          |> Map.put(:buienradar_nowcast, buienradar_nowcast(lat, lon))
+
+        json(conn, data)
 
       {:error, reason} ->
         conn
@@ -58,11 +63,19 @@ defmodule ZeroWeatherWeb.ApiController do
     end
   end
 
-  # 5-minute Buienradar radar nowcast with a 1-minute countdown; an error here must not fail the whole response
-  defp radar_nowcast(lat, lon) do
+  # Our own radar-advection nowcast (drift estimated from the radar frames); an error here must not fail the response
+  defp own_nowcast(lat, lon) do
+    case RadarNowcast.get(lat, lon) do
+      {:ok, nowcast} -> nowcast
+      {:error, reason} -> %{error: "Own radar nowcast unavailable", details: inspect(reason)}
+    end
+  end
+
+  # Buienradar's finished 5-minute point forecast, for comparison
+  defp buienradar_nowcast(lat, lon) do
     case Nowcast.get(lat, lon) do
       {:ok, nowcast} -> nowcast
-      {:error, reason} -> %{error: "Radar nowcast unavailable", details: inspect(reason)}
+      {:error, reason} -> %{error: "Buienradar nowcast unavailable", details: inspect(reason)}
     end
   end
 
