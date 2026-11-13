@@ -189,3 +189,8 @@ mix test
 
 ## 📄 License
 MIT License. Open source for all Belgian weather enthusiasts.
+
+
+## Maths panel, gauge check, live verification
+
+The page shows the forecast's maths (radar field, motion pairs, per-5-minute table, calibration tables). `GaugeAdjust` compares the Melle gauge with the radar and damps a rate correction only above 0.5 mm. `Verifier` scores our forecasts at six places against later RMI frames while the server runs (Brier vs persistence and climatology). A STEPS ensemble (pysteps) was benchmarked and not adopted yet: see `sidecar/README.md`.
