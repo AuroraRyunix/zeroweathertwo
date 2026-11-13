@@ -91,7 +91,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
         socket =
           socket
           |> assign(:active_frame_index, idx)
-          |> push_event("change-radar-frame", %{tileUrl: frame && frame.tile_url_template})
+          |> push_event("change-radar-frame", frame_event(frame))
 
         {:noreply, socket}
 
@@ -122,7 +122,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
       socket =
         socket
         |> assign(:active_frame_index, next_idx)
-        |> push_event("change-radar-frame", %{tileUrl: frame && frame.tile_url_template})
+        |> push_event("change-radar-frame", frame_event(frame))
 
       {:noreply, socket}
     else
@@ -152,7 +152,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
       socket
       |> assign(:weather, weather)
       |> assign(:radar_meta, radar_meta)
-      |> assign(:frames, radar_meta.frames || [])
+      |> refresh_frames()
 
     {:noreply, socket}
   end
@@ -187,7 +187,11 @@ defmodule ZeroWeatherWeb.WeatherLive do
         end
 
       {:noreply,
-       socket |> assign(:own_nowcast, own) |> assign(:own_loading, false) |> pick_nowcast()}
+       socket
+       |> assign(:own_nowcast, own)
+       |> assign(:own_loading, false)
+       |> pick_nowcast()
+       |> refresh_frames()}
     end
   end
 
@@ -195,7 +199,73 @@ defmodule ZeroWeatherWeb.WeatherLive do
     own = keep_if_recent(socket.assigns.own_nowcast)
 
     {:noreply,
-     socket |> assign(:own_nowcast, own) |> assign(:own_loading, false) |> pick_nowcast()}
+     socket
+     |> assign(:own_nowcast, own)
+     |> assign(:own_loading, false)
+     |> pick_nowcast()
+     |> refresh_frames()}
+  end
+
+  # Radar frames plus our forecast frames. The index follows the frame the user is looking at (by time).
+  defp refresh_frames(socket) do
+    past = socket.assigns.radar_meta.frames || []
+    frames = with_forecast(past, socket.assigns.own_nowcast)
+    old = Enum.at(socket.assigns.frames, socket.assigns.active_frame_index)
+
+    idx =
+      case old &&
+             Enum.find_index(
+               frames,
+               &(&1.time == old.time and &1[:forecast_min] == old[:forecast_min])
+             ) do
+        i when is_integer(i) -> i
+        _ -> min(socket.assigns.active_frame_index, max(length(frames) - 1, 0))
+      end
+
+    socket |> assign(:frames, frames) |> assign(:active_frame_index, idx)
+  end
+
+  @forecast_steps [10, 20, 30, 40, 50, 60]
+
+  @doc """
+  Appends forecast frames (+10 .. +60 min): the newest radar image moved along the estimated drift.
+  Only when the drift is known; the shift (km east / north) is applied in the browser.
+  """
+  def with_forecast(frames, %{motion: %{known: true, speed_km_h: v, toward_deg: toward}})
+      when v >= 1.0 do
+    case Enum.filter(frames, &(not &1.is_nowcast)) |> List.last() do
+      nil ->
+        frames
+
+      latest ->
+        rad = toward * :math.pi() / 180
+
+        frames ++
+          for min <- @forecast_steps do
+            km = v * min / 60
+
+            latest
+            |> Map.put(:is_nowcast, true)
+            |> Map.put(:forecast_min, min)
+            |> Map.put(:time, latest.time + min * 60)
+            |> Map.put(:shift_km, %{east: km * :math.sin(rad), north: km * :math.cos(rad)})
+          end
+    end
+  end
+
+  def with_forecast(frames, _own), do: frames
+
+  @doc "Payload for the map hook: tile url and the drift shift (km) for forecast frames."
+  def frame_event(nil), do: %{tileUrl: nil, shiftEast: 0, shiftNorth: 0}
+
+  def frame_event(frame) do
+    shift = Map.get(frame, :shift_km, %{east: 0, north: 0})
+
+    %{
+      tileUrl: frame.tile_url_template,
+      shiftEast: Float.round(shift.east * 1.0, 2),
+      shiftNorth: Float.round(shift.north * 1.0, 2)
+    }
   end
 
   defp load_location(socket, loc) do
@@ -336,9 +406,12 @@ defmodule ZeroWeatherWeb.WeatherLive do
 
   def format_frame_time(nil), do: "--:--"
 
+  def format_frame_time(%{forecast_min: min} = frame) do
+    "#{Nowcast.local_time(DateTime.from_unix!(frame.time))} (Forecast +#{min} min)"
+  end
+
   def format_frame_time(frame) do
-    dt = DateTime.from_unix!(frame.time)
-    formatted = Calendar.strftime(dt, "%H:%M")
+    formatted = Nowcast.local_time(DateTime.from_unix!(frame.time))
     if frame.is_nowcast, do: "#{formatted} (Nowcast)", else: "#{formatted} (Radar)"
   end
 end

@@ -147,4 +147,31 @@ defmodule ZeroWeatherWeb.WeatherLiveTest do
     refute html =~ "Our own nowcast"
     assert html =~ "Dry for the next 2 hours"
   end
+
+  test "the slider gets forecast frames shifted along the drift once our nowcast is known", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, ~p"/")
+    html = render_async(view)
+
+    # the drift in the model is 2 cells / 10 min towards the east
+    assert html =~ "Forecast (+60m)"
+  end
+
+  test "forecast frames carry the drift as an east/north shift in km" do
+    past = [%{is_nowcast: false, time: 1000, tile_url_template: "t"}]
+    motion = %{motion: %{known: true, speed_km_h: 30.0, toward_deg: 90}}
+
+    frames = ZeroWeatherWeb.WeatherLive.with_forecast(past, motion)
+    assert length(frames) == 7
+    last = List.last(frames)
+    assert last.forecast_min == 60 and last.is_nowcast
+    assert_in_delta last.shift_km.east, 30.0, 0.01
+    assert_in_delta last.shift_km.north, 0.0, 0.01
+    assert ZeroWeatherWeb.WeatherLive.frame_event(last).shiftEast == 30.0
+
+    # unknown drift: no forecast frames
+    assert ZeroWeatherWeb.WeatherLive.with_forecast(past, %{motion: %{known: false}}) == past
+    assert ZeroWeatherWeb.WeatherLive.with_forecast(past, nil) == past
+  end
 end

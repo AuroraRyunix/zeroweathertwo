@@ -65,8 +65,24 @@ const Hooks = {
 
       // RainViewer's free radar tiles only exist up to zoom 7 (higher zooms return a "not supported" image),
       // so cap the native zoom and let Leaflet scale the zoom-7 tiles up.
+      // The radar lives in its own pane so a forecast frame can be the newest image slid along the rain's drift.
+      this.map.createPane("radar")
+      this.map.getPane("radar").style.zIndex = 300
+      this.shift = {east: 0, north: 0}
+      const applyShift = () => {
+        const c = this.map.getCenter()
+        const z = this.map.getZoom()
+        const mPerPx = 40075016.686 * Math.cos(c.lat * Math.PI / 180) / (256 * Math.pow(2, z))
+        const dx = this.shift.east * 1000 / mPerPx
+        const dy = -this.shift.north * 1000 / mPerPx
+        this.map.getPane("radar").style.transform = `translate(${dx}px, ${dy}px)`
+      }
+      this.applyShift = applyShift
+      this.map.on("zoomend", applyShift)
+
       const radarTiles = (url) =>
         L.tileLayer(url, {
+          pane: "radar",
           opacity: 0.7,
           zIndex: 10,
           maxNativeZoom: 7,
@@ -89,7 +105,9 @@ const Hooks = {
       }).addTo(this.map)
 
       // Event from LiveView to change radar frame
-      this.handleEvent("change-radar-frame", ({ tileUrl }) => {
+      this.handleEvent("change-radar-frame", ({ tileUrl, shiftEast, shiftNorth }) => {
+        this.shift = {east: shiftEast || 0, north: shiftNorth || 0}
+        this.applyShift()
         if (this.radarLayer) {
           this.map.removeLayer(this.radarLayer)
         }

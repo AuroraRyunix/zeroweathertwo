@@ -334,7 +334,7 @@
           <div class="flex items-center justify-between text-xs text-slate-400 mb-1 font-mono">
             <span>Past (-60m)</span>
             <span class="text-sky-400 font-semibold">Live</span>
-            <span>Nowcast (+30m)</span>
+            <span>{if Enum.any?(@frames, & &1[:forecast_min]), do: "Forecast (+60m)", else: "Nowcast"}</span>
           </div>
           <input
             type="range"
