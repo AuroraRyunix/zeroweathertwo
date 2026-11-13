@@ -52,6 +52,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
       |> assign(:buienradar, fetch_buienradar(default_loc, nil))
       |> assign(:own_nowcast, nil)
       |> assign(:own_loading, connected?(socket))
+      |> assign(:own_error, nil)
       |> pick_nowcast()
       |> start_own_nowcast(default_loc)
       |> assign(:radar_meta, radar_meta)
@@ -186,9 +187,12 @@ defmodule ZeroWeatherWeb.WeatherLive do
           {:error, _reason} -> keep_if_recent(socket.assigns.own_nowcast)
         end
 
+      error = with {:error, reason} <- result, do: reason_text(reason)
+
       {:noreply,
        socket
        |> assign(:own_nowcast, own)
+       |> assign(:own_error, if(is_binary(error), do: error))
        |> assign(:own_loading, false)
        |> pick_nowcast()
        |> refresh_frames()}
@@ -268,6 +272,12 @@ defmodule ZeroWeatherWeb.WeatherLive do
     }
   end
 
+  defp reason_text(:radar_stale), do: "the newest radar image is too old"
+  defp reason_text(:no_frames), do: "no radar images available"
+  defp reason_text(:not_enough_frames), do: "not enough radar images yet"
+  defp reason_text({:recently_failed, _}), do: "the radar server did not answer (retrying)"
+  defp reason_text(other), do: "radar error: #{inspect(other) |> String.slice(0, 80)}"
+
   defp load_location(socket, loc) do
     case Weather.get_nowcast(loc.lat, loc.lon) do
       {:ok, weather} ->
@@ -278,6 +288,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
           |> assign(:buienradar, fetch_buienradar(loc, nil))
           |> assign(:own_nowcast, nil)
           |> assign(:own_loading, true)
+          |> assign(:own_error, nil)
           |> pick_nowcast()
           |> start_own_nowcast(loc)
           |> assign(:page_title, "#{loc.name} · Real-time Nowcast")

@@ -7,14 +7,21 @@ defmodule ZeroWeather.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      ZeroWeatherWeb.Telemetry,
-      {DNSCluster, query: Application.get_env(:zero_weather, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: ZeroWeather.PubSub},
-      ZeroWeather.Cache,
-      # Start to serve requests, typically the last entry
-      ZeroWeatherWeb.Endpoint
-    ]
+    children =
+      [
+        ZeroWeatherWeb.Telemetry,
+        {DNSCluster, query: Application.get_env(:zero_weather, :dns_cluster_query) || :ignore},
+        {Phoenix.PubSub, name: ZeroWeather.PubSub},
+        ZeroWeather.Cache
+      ] ++
+        if(Application.get_env(:zero_weather, :prewarm, true),
+          do: [ZeroWeather.Prewarm],
+          else: []
+        ) ++
+        [
+          # Start to serve requests, typically the last entry
+          ZeroWeatherWeb.Endpoint
+        ]
 
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options

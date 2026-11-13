@@ -143,7 +143,8 @@ defmodule ZeroWeatherWeb.WeatherLiveTest do
     html = render_async(view)
 
     assert html =~ "Rain countdown"
-    assert html =~ "Buienradar 5-minute radar nowcast"
+    assert html =~ "5-minute point forecast, interpolated to 1 minute"
+    assert html =~ "Our own nowcast is unavailable right now: no radar images available."
     refute html =~ "Our own nowcast"
     assert html =~ "Dry for the next 2 hours"
   end

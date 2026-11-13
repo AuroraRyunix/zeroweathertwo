@@ -151,7 +151,15 @@
             <dl class="zw-dl">
               <dt>Method</dt>
               <dd id="radar-nowcast-source">
-                {@radar_nowcast.source} 5-minute radar nowcast, interpolated to 1 minute
+                Buienradar's 5-minute point forecast, interpolated to 1 minute.
+                <%= cond do %>
+                  <% @own_loading -> %>
+                    Shown while our own nowcast is computed.
+                  <% @own_error -> %>
+                    Our own nowcast is unavailable right now: {@own_error}.
+                  <% true -> %>
+                    Our own nowcast is unavailable right now.
+                <% end %>
               </dd>
               <dt>Fetched</dt>
               <dd id="radar-nowcast-updated">
