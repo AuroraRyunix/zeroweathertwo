@@ -365,6 +365,37 @@ defmodule ZeroWeatherWeb.WeatherLive do
   def radar_hero_text(%{headline: headline, detail: nil}), do: headline
   def radar_hero_text(%{headline: headline, detail: detail}), do: "#{headline} #{detail}"
 
+  @doc """
+  Bars of the precipitation chart: 5-minute steps of our radar nowcast (expected rate and chance), or the
+  Open-Meteo 15-minute timeline when no radar nowcast is available. Returns `{source, steps}`.
+  """
+  def chart_steps(%{series: [_ | _] = series}, _timeline) do
+    steps =
+      series
+      |> Enum.chunk_every(5)
+      |> Enum.with_index()
+      |> Enum.map(fn {chunk, i} ->
+        rate =
+          chunk
+          |> Enum.map(&(Map.get(&1, :mean_mm_h) || &1.mm_h))
+          |> Enum.sum()
+          |> Kernel./(length(chunk))
+
+        %{
+          time: hd(chunk).time,
+          label: if(rem(i, 3) == 0, do: hd(chunk).time, else: ""),
+          precip_mm: Float.round(rate * 1.0, 2),
+          probability: chunk |> Enum.map(&Map.get(&1, :chance, 0)) |> Enum.max()
+        }
+      end)
+
+    {:five_minute, steps}
+  end
+
+  def chart_steps(_nowcast, timeline) do
+    {:fifteen_minute, Enum.map(timeline || [], &Map.put(&1, :label, &1.time))}
+  end
+
   @doc "Local (Belgian) clock time of an ISO8601 UTC timestamp."
   def local_clock(iso) when is_binary(iso) do
     case DateTime.from_iso8601(iso) do

@@ -192,4 +192,26 @@ defmodule ZeroWeatherWeb.WeatherLiveTest do
     assert_push_event(view, "change-radar-frame", %{shiftEast: east})
     assert east > 0
   end
+
+  test "the precipitation chart uses 5-minute steps of our nowcast", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/")
+    html = render_async(view)
+
+    assert html =~ "Precipitation Nowcast (Next 2 Hours)"
+    assert html =~ "5-minute expected rain rate"
+    refute html =~ "15-minute expected rainfall"
+  end
+
+  test "chart steps: 24 five-minute bars, or the 15-minute timeline as fallback" do
+    series =
+      for m <- 0..119,
+          do: %{time: "12:#{m}", mm_h: 2.0, mean_mm_h: 1.0, chance: if(m < 5, do: 80, else: 5)}
+
+    {:five_minute, steps} = ZeroWeatherWeb.WeatherLive.chart_steps(%{series: series}, [])
+    assert length(steps) == 24
+    assert hd(steps).probability == 80 and hd(steps).precip_mm == 1.0
+
+    assert {:fifteen_minute, [%{label: "12:00"}]} =
+             ZeroWeatherWeb.WeatherLive.chart_steps(nil, [%{time: "12:00"}])
+  end
 end
