@@ -17,7 +17,7 @@ config :phoenix, :plug_init_mode, :runtime
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
-config :zero_weather, prewarm: false
+config :zero_weather, prewarm: false, rmi_radar: false
 
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,

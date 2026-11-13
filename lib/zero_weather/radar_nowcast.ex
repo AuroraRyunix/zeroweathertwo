@@ -15,7 +15,7 @@ defmodule ZeroWeather.RadarNowcast do
   Intensity is kept constant (no growth or decay of showers), so skill drops with lead time, mostly after an hour.
   """
 
-  alias ZeroWeather.{Cache, Nowcast, Radar, RadarGrid}
+  alias ZeroWeather.{Cache, Nowcast, Radar, RadarGrid, RmiRadar}
 
   # window half size in (0.75 km) cells (~150 km): enough upstream distance for 2 hours at ~65 km/h
   @half 200
@@ -49,6 +49,12 @@ defmodule ZeroWeather.RadarNowcast do
   @likely 50
   @possible 25
   @model_ttl 900
+  # RMI composite: window half size in 1 km cells (~150 km), and how far from the raster edge a point must be
+  @rmi_half 150
+  @rmi_cell_km 1.0
+  @rmi_margin_deg 1.5
+  # RainViewer must be this many seconds newer before it is preferred over the (more accurate) RMI float data
+  @prefer_rmi_margin 300
   @max_frame_age 45 * 60
 
   @doc """
@@ -59,10 +65,80 @@ defmodule ZeroWeather.RadarNowcast do
     lat = Float.round(lat * 1.0, 2)
     lon = Float.round(lon * 1.0, 2)
 
+    case rmi_model(lat, lon, now) do
+      {:ok, model} ->
+        {:ok, forecast(model, now)}
+
+      {:error, _rmi_reason} ->
+        # RMI unreachable, outside its composite or behind RainViewer: use the RainViewer tiles instead
+        with {:ok, meta} <- Radar.get_radar_meta(),
+             {:ok, frames} <- pick_frames(meta, now),
+             {:ok, model} <- model(meta.host, frames, lat, lon) do
+          {:ok, forecast(model, now)}
+        end
+    end
+  end
+
+  # -- primary source: RMI's float rain-rate composite (5-minute steps) ---------------------------
+
+  defp rmi_model(lat, lon, now) do
+    with true <- Application.get_env(:zero_weather, :rmi_radar, true) || {:error, :rmi_disabled},
+         {:ok, newest} <- RmiRadar.latest_time(),
+         :ok <- check_fresh(newest, now),
+         :ok <- not_behind_rainviewer(newest) do
+      Cache.fetch({:radar_nowcast_model, :rmi, lat, lon, newest}, @model_ttl, fn ->
+        build_rmi_model(newest, lat, lon)
+      end)
+    end
+  end
+
+  # RMI publishes in bursts (the newest frame was up to 30 minutes old in a measurement): when RainViewer has a frame
+  # that is clearly newer, the staler float data would forecast the past, so use RainViewer then.
+  defp not_behind_rainviewer(rmi_newest) do
     with {:ok, meta} <- Radar.get_radar_meta(),
-         {:ok, frames} <- pick_frames(meta, now),
-         {:ok, model} <- model(meta.host, frames, lat, lon) do
-      {:ok, forecast(model, now)}
+         [_ | _] = past <- Enum.reject(meta.frames, & &1.is_nowcast),
+         rv_newest = past |> Enum.map(& &1.time) |> Enum.max(),
+         true <- rv_newest > rmi_newest + @prefer_rmi_margin do
+      {:error, :rainviewer_is_fresher}
+    else
+      _ -> :ok
+    end
+  end
+
+  defp check_fresh(newest, now),
+    do: if(DateTime.to_unix(now) - newest > @max_frame_age, do: {:error, :radar_stale}, else: :ok)
+
+  defp build_rmi_model(newest, lat, lon) do
+    # newest frame plus the ones 10 and 20 minutes earlier (the motion code works on 10-minute pairs)
+    times = [newest, newest - @frame_seconds, newest - 2 * @frame_seconds]
+
+    frames = Enum.map(times, &RmiRadar.frame/1)
+
+    case Enum.find(frames, &match?({:error, _}, &1)) do
+      {:error, reason} ->
+        {:error, reason}
+
+      nil ->
+        [{:ok, newest_frame} | _] = frames
+
+        if RmiRadar.covers?(newest_frame, lat, lon, @rmi_margin_deg) do
+          grids =
+            for {:ok, f} <- frames, do: RmiRadar.window(f, lat, lon, @rmi_half, @rmi_cell_km)
+
+          {:ok,
+           %{
+             grid: hd(grids),
+             frame_time: newest,
+             motion:
+               grids |> Enum.map(&RadarGrid.coarsen/1) |> estimate_motion_chain() |> fine_motion(),
+             lat: lat,
+             lon: lon,
+             radar_source: :rmi,
+             source: "RMI radar composite (5-minute float rain rate), own advection nowcast"
+           }}
+        else
+          {:error, :outside_rmi_coverage}
+        end
     end
   end
 
@@ -270,7 +346,7 @@ defmodule ZeroWeather.RadarNowcast do
   def forecast(model, now, opts \\ [])
 
   def forecast(
-        %{grid: grid, frame_time: frame_time, motion: motion, lat: lat, lon: lon},
+        %{grid: grid, frame_time: frame_time, motion: motion, lat: lat, lon: lon} = model,
         %DateTime{} = now,
         opts
       ) do
@@ -324,7 +400,8 @@ defmodule ZeroWeather.RadarNowcast do
       end
 
     %{
-      source: "RainViewer radar, own advection nowcast",
+      source: Map.get(model, :source, "RainViewer radar, own advection nowcast"),
+      radar_source: Map.get(model, :radar_source, :rainviewer),
       method: "radar-advection",
       frame_time: DateTime.from_unix!(frame_time) |> DateTime.to_iso8601(),
       frame_age_min: Float.round((DateTime.to_unix(now) - frame_time) / 60, 1),

@@ -129,6 +129,8 @@
               <dd id="radar-nowcast-source">
                 Our own nowcast: radar frames tracked and advected to this point, 1-minute steps
               </dd>
+              <dt>Radar source</dt>
+              <dd id="radar-nowcast-radar-source">{@radar_nowcast.source}</dd>
               <dt>Rain drift</dt>
               <dd id="radar-nowcast-motion">{motion_text(@radar_nowcast.motion)}</dd>
               <dt>Track confidence</dt>
@@ -223,11 +225,14 @@
       <dl class="zw-dl" style="grid-template-columns: 11rem 1fr">
         <dt>Rain forecast</dt>
         <dd>
-          Computed here from the
-          <a href="https://www.rainviewer.com/" class="underline">RainViewer</a>
-          radar composite (one image every 10 minutes). Each pixel's colour is converted back to
-          reflectivity and then to a rain rate (Marshall-Palmer, Z = 200 R^1.6), and averaged into
-          0.75 km cells.
+          Computed here from the Belgian radar rain-rate composite of the <a
+            href="https://opendata.meteo.be/"
+            class="underline"
+          >Royal Meteorological Institute (RMI)</a>:
+          real floating-point mm/h on a 1.3 km grid every 5 minutes, read from RMI's open-data service
+          (no rendered images). When RainViewer's composite is more than 5 minutes newer, that one is used
+          instead, because RMI publishes in bursts. RainViewer's rain rates are decoded from its picture palette
+          (coarser) and averaged into 0.75 km cells.
         </dd>
         <dt>Drift</dt>
         <dd>
@@ -246,8 +251,11 @@
         </dd>
         <dt>Limits</dt>
         <dd>
-          Frames are 10 minutes apart and about 5 to 7 minutes old when read, and the radar resolves
-          about 1 km. The minute-by-minute timing is an extrapolation, not 1-minute data.
+          The newest radar frame is typically 5 to 10 minutes old and, in a measurement of RMI's feed,
+          occasionally much older (it arrives in bursts); the forecast is moved forward from the
+          frame's own time, but that age is real. The radar resolves about 1 km, and showers are
+          not grown or decayed, so the minute-by-minute timing is an extrapolation. No rain-gauge
+          or dew-point correction is applied yet.
         </dd>
         <dt>Cross-check</dt>
         <dd>
