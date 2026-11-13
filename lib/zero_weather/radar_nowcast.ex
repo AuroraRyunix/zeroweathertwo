@@ -134,6 +134,7 @@ defmodule ZeroWeather.RadarNowcast do
       {:ok,
        %{
          grid: hd(grids),
+         field: field_stats(hd(grids)),
          frame_time: newest_frame.time,
          motion:
            grids |> Enum.map(&RadarGrid.coarsen/1) |> estimate_motion_chain() |> fine_motion(),
@@ -205,6 +206,7 @@ defmodule ZeroWeather.RadarNowcast do
         {:ok,
          %{
            grid: g0,
+           field: field_stats(g0),
            frame_time: newest.time,
            motion:
              fine_motion(estimate_motion_chain(Enum.map(grids, &RadarGrid.coarsen(elem(&1, 1))))),
@@ -241,14 +243,16 @@ defmodule ZeroWeather.RadarNowcast do
           %{
             dx: (a.dx * a.quality + b.dx * b.quality) / w,
             dy: (a.dy * a.quality + b.dy * b.quality) / w,
-            quality: min(a.quality, b.quality)
+            quality: min(a.quality, b.quality),
+            pairs: [pair_info(a), pair_info(b)],
+            combined: true
           }
         else
-          a
+          Map.merge(a, %{pairs: [pair_info(a), pair_info(b)], combined: false})
         end
 
       {{:ok, a}, _} ->
-        a
+        Map.merge(a, %{pairs: [pair_info(a)], combined: false})
 
       {{:error, reason}, {:ok, b}} when reason in [:not_enough_rain, :low_correlation] ->
         Map.put(b, :reason, :older_pair_only)
@@ -257,6 +261,8 @@ defmodule ZeroWeather.RadarNowcast do
         %{dx: 0.0, dy: 0.0, quality: 0.0, reason: reason}
     end
   end
+
+  defp pair_info(%{dx: dx, dy: dy, quality: q}), do: %{dx: dx, dy: dy, quality: q}
 
   @doc "Drift between two grids (`newer` and `older`, one frame apart) by normalised cross-correlation."
   def estimate_motion(newer, older) do
@@ -377,18 +383,16 @@ defmodule ZeroWeather.RadarNowcast do
 
     start = div(DateTime.to_unix(now), 60) * 60
 
+    t0 = System.monotonic_time(:microsecond)
+
     series =
       for i <- 0..(max(max_lead, 1) - 1) do
         t = start + i * 60
         tau = (t - frame_time) / 60
+        radius = smooth_base + tau * smooth_rate
 
         {mean, raw_chance, rate_if_rain} =
-          sample_disk(
-            grid,
-            grid.cx - vx * tau,
-            grid.cy - vy * tau,
-            smooth_base + tau * smooth_rate
-          )
+          sample_disk(grid, grid.cx - vx * tau, grid.cy - vy * tau, radius)
 
         decay = if decay_min, do: :math.exp(-tau / decay_min), else: 1.0
         at = DateTime.from_unix!(t)
@@ -400,9 +404,15 @@ defmodule ZeroWeather.RadarNowcast do
           mm_h: Float.round(rate_if_rain * decay, 3),
           mean_mm_h: Float.round(mean * decay, 3),
           chance: round(calibrate(raw_chance * 100, tau)),
-          chance_raw: round(raw_chance * 100)
+          chance_raw: round(raw_chance * 100),
+          # since the radar frame; how far upstream the rain is sampled and how wide the averaging disk is
+          lead_min: Float.round(tau, 1),
+          upstream_km: Float.round(:math.sqrt(vx * vx + vy * vy) * tau * cell_km, 1),
+          radius_km: Float.round(radius * cell_km, 2)
         }
       end
+
+    forecast_us = System.monotonic_time(:microsecond) - t0
 
     %{
       source: Map.get(model, :source, "RainViewer radar, own advection nowcast"),
@@ -414,6 +424,7 @@ defmodule ZeroWeather.RadarNowcast do
       location: %{lat: lat, lon: lon},
       motion: describe_motion(motion, speed_km_h),
       series: series,
+      diagnostics: diagnostics(model, motion, series, speed_km_h, forecast_us),
       summary:
         Nowcast.summarize(series,
           rain?: &(&1.chance >= @likely),
@@ -482,6 +493,97 @@ defmodule ZeroWeather.RadarNowcast do
     wet = Enum.filter(samples, &(&1 >= @rain_threshold))
     rate_if_rain = if wet == [], do: 0.0, else: Enum.sum(wet) / length(wet)
     {Enum.sum(samples) / n, length(wet) / n, rate_if_rain}
+  end
+
+  @doc """
+  Everything the forecast is built from, for display: the radar field, the motion estimate, the model constants and
+  sums over the forecast. Nothing here feeds back into the forecast.
+  """
+  def diagnostics(model, motion, series, speed_km_h, forecast_us) do
+    cell_km = model.grid.cell_km
+    mean_sum = fn n -> series |> Enum.take(n) |> Enum.map(& &1.mean_mm_h) |> Enum.sum() end
+    peak = Enum.max_by(series, & &1.mean_mm_h, fn -> nil end)
+
+    %{
+      grid: %{
+        cells: model.grid.n,
+        cell_km: Float.round(cell_km, 3),
+        window_km: Float.round(model.grid.n * cell_km, 0),
+        coarse_cell_km: Float.round(cell_km * 2, 3)
+      },
+      field: Map.get(model, :field),
+      motion: %{
+        dx_cells: Float.round(motion.dx * 1.0, 3),
+        dy_cells: Float.round(motion.dy * 1.0, 3),
+        cell_km: Float.round(cell_km, 3),
+        frame_step_min: div(@frame_seconds, 60),
+        speed_km_h: Float.round(speed_km_h, 2),
+        east_km_h: Float.round(motion.dx * cell_km * 3600 / @frame_seconds, 2),
+        south_km_h: Float.round(motion.dy * cell_km * 3600 / @frame_seconds, 2),
+        quality: Float.round(motion.quality * 1.0, 3),
+        pairs: Map.get(motion, :pairs, []),
+        combined: Map.get(motion, :combined, false),
+        min_quality: @min_quality,
+        search_range_cells: @max_shift,
+        tracked_radius_km: Float.round(@motion_half * cell_km * 2, 0)
+      },
+      model: %{
+        smooth_base_km: @smooth_base_km,
+        smooth_per_min_km: @smooth_per_min_km,
+        rain_threshold_mm_h: @rain_threshold,
+        likely_pct: @likely,
+        possible_pct: @possible,
+        late_shrink: @late_shrink,
+        horizon_min: @horizon_min,
+        calibration:
+          for(
+            {lead, table} <- @calibration,
+            do: %{lead_min: lead, table: Enum.map(table, fn {raw, cal} -> [raw, cal] end)}
+          )
+      },
+      forecast: %{
+        expected_mm_1h: Float.round(mean_sum.(60) / 60, 2),
+        expected_mm_2h: Float.round(mean_sum.(120) / 60, 2),
+        peak_mean_mm_h: peak && peak.mean_mm_h,
+        peak_at: peak && peak.time,
+        max_chance: series |> Enum.map(& &1.chance) |> Enum.max(fn -> 0 end),
+        likely_minutes: Enum.count(series, &(&1.chance >= @likely)),
+        series_minutes: length(series),
+        compute_ms: Float.round(forecast_us / 1000, 1)
+      }
+    }
+  end
+
+  @doc "Summary statistics of a radar window (the whole grid and the 25 km around its centre)."
+  def field_stats(%{n: n, cx: cx, cy: cy, cell_km: cell_km} = grid) do
+    near = 25 / cell_km
+
+    {wet, sum, max, nwet, nsum} =
+      for y <- 0..(n - 1), x <- 0..(n - 1), reduce: {0, 0.0, 0.0, {0, 0}, 0.0} do
+        {w, s, m, {nw, nt}, ns} ->
+          v = RadarGrid.cell(grid, x, y)
+          in_near = (x - cx) * (x - cx) + (y - cy) * (y - cy) <= near * near
+          is_wet = v >= @rain_threshold
+          nw2 = if in_near and is_wet, do: nw + 1, else: nw
+          nt2 = if in_near, do: nt + 1, else: nt
+          ns2 = if in_near and is_wet, do: ns + v, else: ns
+
+          {if(is_wet, do: w + 1, else: w), if(is_wet, do: s + v, else: s), max(m, v), {nw2, nt2},
+           ns2}
+      end
+
+    {nw, nt} = nwet
+
+    %{
+      wet_cells: wet,
+      total_cells: n * n,
+      wet_pct: Float.round(wet / (n * n) * 100, 2),
+      mean_wet_mm_h: if(wet > 0, do: Float.round(sum / wet, 2), else: 0.0),
+      max_mm_h: Float.round(max * 1.0, 1),
+      near_25km_wet_pct: Float.round(nw / max(nt, 1) * 100, 1),
+      near_25km_mean_wet_mm_h: if(nw > 0, do: Float.round(nsum / nw, 2), else: 0.0),
+      rate_at_point_mm_h: Float.round(RadarGrid.sample(grid, cx, cy) * 1.0, 2)
+    }
   end
 
   defp describe_motion(%{quality: quality} = motion, speed_km_h) do

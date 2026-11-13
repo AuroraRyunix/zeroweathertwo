@@ -148,3 +148,14 @@ body { background: var(--zw-bg); color: var(--zw-text); }
 .zw-chart .now { stroke: var(--zw-text); stroke-width: 1; opacity: 0.35; }
 .zw-key { display: inline-block; width: 0.7rem; height: 0.7rem; margin-right: 0.35rem; vertical-align: -1px; }
 .zw input[type=range] { width: 100%; accent-color: var(--zw-accent); }
+
+/* lab: the maths and metrics */
+.zw-lab details { border-top: 1px solid var(--zw-line); padding: 0.6rem 0; }
+.zw-lab details:first-of-type { border-top: 0; }
+.zw-lab summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+.zw-lab .zw-eq { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; color: var(--zw-muted); margin: 0.4rem 0; line-height: 1.5; white-space: pre-wrap; }
+.zw-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; font-variant-numeric: tabular-nums; margin: 0.5rem 0; }
+.zw-table th { text-align: right; font-weight: 600; color: var(--zw-muted); border-bottom: 1px solid var(--zw-line); padding: 0.25rem 0.5rem; white-space: nowrap; }
+.zw-table td { text-align: right; padding: 0.2rem 0.5rem; border-bottom: 1px solid var(--zw-line); }
+.zw-table th:first-child, .zw-table td:first-child { text-align: left; }
+.zw-scroll { overflow-x: auto; }

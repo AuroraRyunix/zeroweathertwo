@@ -65,7 +65,7 @@ defmodule ZeroWeatherWeb.ApiController do
 
   # Our own radar-advection nowcast (drift estimated from the radar frames); an error here must not fail the response
   defp own_nowcast(lat, lon) do
-    case RadarNowcast.get(lat, lon) do
+    case lat |> RadarNowcast.get(lon) |> ZeroWeather.GaugeAdjust.apply(ZeroWeather.Gauges.latest(lat, lon)) do
       {:ok, nowcast} -> nowcast
       {:error, reason} -> %{error: "Own radar nowcast unavailable", details: inspect(reason)}
     end

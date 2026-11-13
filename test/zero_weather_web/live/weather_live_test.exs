@@ -202,6 +202,13 @@ defmodule ZeroWeatherWeb.WeatherLiveTest do
     assert has_element?(view, "svg#radar-nowcast-strip rect.bar")
     assert html =~ "Tracking data"
     assert html =~ "Track confidence"
+    # the maths: field, motion, the per-5-minute table, calibration, gauge, verification
+    assert has_element?(view, "#lab-field")
+    assert has_element?(view, "#lab-motion")
+    assert has_element?(view, "table#lab-series tbody tr")
+    assert has_element?(view, "#lab-calibration")
+    assert has_element?(view, "table#lab-hindcast")
+    assert html =~ "Brier score"
     assert html =~ "How this is sourced"
     refute html =~ "Presets"
     refute html =~ "My GPS"

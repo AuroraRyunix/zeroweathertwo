@@ -18,6 +18,10 @@ defmodule ZeroWeather.Application do
           do: [ZeroWeather.Prewarm],
           else: []
         ) ++
+        if(Application.get_env(:zero_weather, :verify, true),
+          do: [ZeroWeather.Verifier],
+          else: []
+        ) ++
         [
           # Start to serve requests, typically the last entry
           ZeroWeatherWeb.Endpoint

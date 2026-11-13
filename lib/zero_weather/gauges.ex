@@ -114,6 +114,9 @@ defmodule ZeroWeather.Gauges do
 
     %{
       station: station.name,
+      station_lat: station.lat,
+      station_lon: station.lon,
+      records: Enum.flat_map(records, &record_with_unix/1),
       distance_km: Float.round(distance, 1),
       time: newest.time,
       temperature: newest.temperature && Float.round(newest.temperature, 1),
@@ -129,6 +132,13 @@ defmodule ZeroWeather.Gauges do
         |> Enum.sum()
         |> Float.round(1)
     }
+  end
+
+  defp record_with_unix(r) do
+    case DateTime.from_iso8601(r.time) do
+      {:ok, dt, _} -> [%{unix: DateTime.to_unix(dt), time: r.time, mm: r.precip_mm_10min}]
+      _ -> []
+    end
   end
 
   @doc "Dew point in degrees Celsius (Magnus formula) from temperature (C) and relative humidity (%)."

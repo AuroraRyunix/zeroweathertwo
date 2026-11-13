@@ -184,6 +184,290 @@
           <% end %>
         </section>
       <% end %>
+
+      <%= if @radar_nowcast && own?(@radar_nowcast) && @radar_nowcast[:diagnostics] do %>
+        <% d = @radar_nowcast.diagnostics %>
+        <section id="lab" class="zw-section zw-lab">
+          <h2 class="zw-h">Maths and metrics</h2>
+          <p class="text-sm zw-muted">
+            Everything the forecast above is computed from, as it is computed.
+            <a
+              class="underline"
+              href={"/api/v1/nowcast?lat=#{@active_location.lat}&lon=#{@active_location.lon}"}
+            >
+              Raw JSON
+            </a>
+          </p>
+
+          <details open id="lab-field">
+            <summary>Radar field (window around the point)</summary>
+            <dl class="zw-dl mt-2">
+              <dt>Window</dt>
+              <dd>
+                {d.grid.cells} × {d.grid.cells} cells of {d.grid.cell_km} km = {round(
+                  d.grid.window_km
+                )} km square
+              </dd>
+              <%= if d.field do %>
+                <dt>Rain at the point now</dt>
+                <dd>{d.field.rate_at_point_mm_h} mm/h</dd>
+                <dt>Wet cells (≥ {d.model.rain_threshold_mm_h} mm/h)</dt>
+                <dd>
+                  {d.field.wet_cells} of {d.field.total_cells} ({d.field.wet_pct}%), mean {d.field.mean_wet_mm_h} mm/h where wet, maximum {d.field.max_mm_h} mm/h
+                </dd>
+                <dt>Within 25 km of the point</dt>
+                <dd>
+                  {d.field.near_25km_wet_pct}% wet, mean {d.field.near_25km_mean_wet_mm_h} mm/h where wet
+                </dd>
+              <% end %>
+            </dl>
+          </details>
+
+          <details open id="lab-motion">
+            <summary>Motion estimate</summary>
+            <dl class="zw-dl mt-2">
+              <dt>Shift per {d.motion.frame_step_min} min</dt>
+              <dd>
+                dx = {d.motion.dx_cells} cells east, dy = {d.motion.dy_cells} cells south
+                (cell {d.motion.cell_km} km)
+              </dd>
+              <dt>Velocity</dt>
+              <dd>
+                {d.motion.east_km_h} km/h east, {d.motion.south_km_h} km/h south; speed {d.motion.speed_km_h} km/h
+              </dd>
+              <dt>Correlation</dt>
+              <dd>
+                {d.motion.quality} (threshold {d.motion.min_quality}; search ±{d.motion.search_range_cells} coarse cells,
+                rain within {round(d.motion.tracked_radius_km)} km tracked)
+              </dd>
+              <%= if d.motion.pairs != [] do %>
+                <dt>Frame pairs</dt>
+                <dd>
+                  <%= for {p, i} <- Enum.with_index(d.motion.pairs) do %>
+                    <span class="block">
+                      pair {i + 1}: dx {Float.round(p.dx * 1.0, 2)}, dy {Float.round(
+                        p.dy * 1.0,
+                        2
+                      )}, correlation {Float.round(
+                        p.quality * 1.0,
+                        3
+                      )}
+                    </span>
+                  <% end %>
+                  {if d.motion.combined,
+                    do: "Pairs agree within 2.5 cells: averaged, weighted by correlation.",
+                    else: "Newest pair used alone."}
+                </dd>
+              <% end %>
+            </dl>
+            <p class="zw-eq">
+              score(dx,dy) = Σ f_new(x,y)·f_old(x−dx,y−dy) / √(Σ f_new² · Σ f_old²),  f = ln(1 + mm/h)
+              best shift = argmax score, refined by a parabola through its neighbours
+            </p>
+          </details>
+
+          <details open id="lab-forecast-table">
+            <summary>Forecast, every 5 minutes</summary>
+            <p class="zw-eq">
+              sample point = point − drift × lead  (the rain that arrives is upstream now)
+              disk radius = {d.model.smooth_base_km} km + {d.model.smooth_per_min_km} km × lead
+              raw % = wet cells in disk / cells in disk;  chance = calibration(raw %, lead)
+              rate if rain = mean of the wet cells;  mean = mean of all cells in the disk
+            </p>
+            <div class="zw-scroll">
+              <table class="zw-table" id="lab-series">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Lead (min)</th>
+                    <th>Upstream (km)</th>
+                    <th>Disk (km)</th>
+                    <th>Raw</th>
+                    <th>Chance</th>
+                    <th>Rate if rain (mm/h)</th>
+                    <th>Mean (mm/h)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <%= for p <- lab_rows(@radar_nowcast.series) do %>
+                    <tr>
+                      <td>{p.time}</td>
+                      <td>{p.lead_min}</td>
+                      <td>{p.upstream_km}</td>
+                      <td>{p.radius_km}</td>
+                      <td>{p.chance_raw}%</td>
+                      <td>{p.chance}%</td>
+                      <td>{p.mm_h}</td>
+                      <td>{p.mean_mm_h}</td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+            <dl class="zw-dl mt-2">
+              <dt>Expected rain</dt>
+              <dd>
+                {d.forecast.expected_mm_1h} mm in the next hour, {d.forecast.expected_mm_2h} mm in the next two
+                (sum of the mean rate × 1/60 h per minute)
+              </dd>
+              <dt>Peak</dt>
+              <dd>
+                {d.forecast.peak_mean_mm_h} mm/h mean at {d.forecast.peak_at}; highest chance {d.forecast.max_chance}%
+              </dd>
+              <dt>Likely minutes</dt>
+              <dd>
+                {d.forecast.likely_minutes} of {d.forecast.series_minutes} minutes at ≥ {d.model.likely_pct}% chance
+              </dd>
+              <dt>Computed in</dt>
+              <dd>{d.forecast.compute_ms} ms for this series</dd>
+            </dl>
+          </details>
+
+          <details id="lab-calibration">
+            <summary>Calibration tables (raw % → chance %)</summary>
+            <p class="zw-eq">
+              Fitted on a replay of radar and checked on a second replay; blended linearly between the leads shown,
+              and shrunk by up to {round(d.model.late_shrink * 100)}% towards +120 min.
+              "Likely" at ≥ {d.model.likely_pct}%, "possible" at ≥ {d.model.possible_pct}%.
+            </p>
+            <dl class="zw-dl mt-2">
+              <%= for c <- d.model.calibration do %>
+                <dt>At +{c.lead_min} min</dt>
+                <dd class="font-mono text-xs">
+                  {Enum.map_join(c.table, ", ", fn [raw, cal] -> "#{raw}→#{cal}" end)}
+                </dd>
+              <% end %>
+            </dl>
+          </details>
+
+          <details open id="lab-gauge">
+            <summary>Rain gauge check</summary>
+            <%= if d[:gauge] do %>
+              <% g = d.gauge %>
+              <dl class="zw-dl mt-2">
+                <dt>Station</dt>
+                <dd>{g.station}</dd>
+                <%= if g[:intervals] && g.intervals != [] do %>
+                  <dt>Last {g.window_min} min</dt>
+                  <dd>
+                    gauge {g.gauge_mm} mm, radar {g.radar_mm} mm over {g.paired} paired 10-minute intervals
+                  </dd>
+                <% end %>
+                <dt>Correction</dt>
+                <dd>
+                  <%= cond do %>
+                    <% g[:applied] -> %>
+                      rate × {g.factor} (ratio {g.ratio}, weight {g.weight}); {g.note}
+                    <% true -> %>
+                      none (factor 1.0): {g[:note] || "not compared"}
+                  <% end %>
+                </dd>
+                <dt>Dry air</dt>
+                <dd>
+                  {if g[:virga_risk],
+                    do:
+                      "depression ≥ 8 °C: light echoes may evaporate before they reach the ground (not applied to the forecast)",
+                    else: "no virga risk from the dew point"}
+                </dd>
+              </dl>
+              <p class="zw-eq">
+                ratio = (gauge + 0.1) / (radar + 0.1), clamped 0.5 to 2;  weight = min(1, max(gauge, radar) / {g.full_weight_mm} mm)
+                factor = 1 + weight × (ratio − 1);  applied only above {g.min_mm} mm in the window; chance is never changed
+              </p>
+            <% else %>
+              <p class="text-sm zw-muted mt-2">No gauge near this point.</p>
+            <% end %>
+          </details>
+
+          <details open id="lab-verification">
+            <summary>Verification: how good is this forecast?</summary>
+            <p class="zw-eq">
+              Brier score = mean of (chance − outcome)², outcome 1 if the radar shows ≥ 0.1 mm/h at the point, else 0.
+              Lower is better. Skill = 1 − Brier / Brier(climatology), where climatology always forecasts the observed
+              rain frequency. Persistence says "rain now means rain then".
+            </p>
+            <%= if @verification && @verification.scored > 0 do %>
+              <% v = @verification %>
+              <p class="text-sm">
+                Live since {v.started_at}: {v.origins} forecast runs at {length(v.points)} places
+                ({Enum.join(v.points, ", ")}), {v.scored} outcomes scored, {v.pending} waiting for their radar frame.
+              </p>
+              <div class="zw-scroll">
+                <table class="zw-table" id="lab-live">
+                  <thead>
+                    <tr>
+                      <th>Lead (min)</th>
+                      <th>n</th>
+                      <th>Rain %</th>
+                      <th>Brier chance</th>
+                      <th>Brier raw</th>
+                      <th>Persistence</th>
+                      <th>Climatology</th>
+                      <th>Skill</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <%= for b <- v.bands, b.n > 0 do %>
+                      <tr>
+                        <td>{b.lead}</td>
+                        <td>{b.n}</td>
+                        <td>{b.wet_pct}</td>
+                        <td>{b.brier_calibrated}</td>
+                        <td>{b.brier_raw}</td>
+                        <td>{b.brier_persistence}</td>
+                        <td>{b.brier_climatology}</td>
+                        <td>
+                          {if b.brier_climatology > 0,
+                            do: Float.round(1 - b.brier_calibrated / b.brier_climatology, 2),
+                            else: "-"}
+                        </td>
+                      </tr>
+                    <% end %>
+                  </tbody>
+                </table>
+              </div>
+            <% else %>
+              <p class="text-sm zw-muted">
+                Live scores appear once forecasts made after this server started have been checked against the radar
+                (the first ones after about 10 to 15 minutes; the long leads after two hours).
+              </p>
+            <% end %>
+            <p class="text-sm mt-3">
+              Replay of one day of RMI radar (13 November 2026, 10 places, 9,354 forecast and outcome pairs, 664 of them wet):
+            </p>
+            <div class="zw-scroll">
+              <table class="zw-table" id="lab-hindcast">
+                <thead>
+                  <tr>
+                    <th>Lead (min)</th>
+                    <th>Brier chance</th>
+                    <th>Climatology</th>
+                    <th>Skill</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>5–20</td><td>0.021</td><td>0.068</td><td>0.69</td>
+                  </tr>
+                  <tr>
+                    <td>45–60</td><td>0.043</td><td>0.068</td><td>0.37</td>
+                  </tr>
+                  <tr>
+                    <td>65–90</td><td>0.055</td><td>0.064</td><td>0.14</td>
+                  </tr>
+                  <tr>
+                    <td>95–125</td><td>0.058</td><td>0.062</td><td>0.06</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="text-xs zw-muted">
+              One day of mostly light showers is a small sample. The radar itself is the reference, so this scores
+              the extrapolation, not the radar's accuracy.
+            </p>
+          </details>
+        </section>
+      <% end %>
     <% end %>
 
     <section class="zw-section">

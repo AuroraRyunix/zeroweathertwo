@@ -1,7 +1,7 @@
 defmodule ZeroWeatherWeb.WeatherLive do
   use ZeroWeatherWeb, :live_view
 
-  alias ZeroWeather.{Weather, Radar, Locations, Nowcast, RadarNowcast, Gauges}
+  alias ZeroWeather.{Weather, Radar, Locations, Nowcast, RadarNowcast, Gauges, GaugeAdjust}
 
   # 3 minutes
   @refresh_interval 180_000
@@ -54,6 +54,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
       |> assign(:own_loading, connected?(socket))
       |> assign(:own_error, nil)
       |> assign(:gauge, nil)
+      |> assign(:verification, ZeroWeather.Verifier.snapshot())
       |> pick_nowcast()
       |> start_own_nowcast(default_loc)
       |> assign(:radar_meta, radar_meta)
@@ -166,6 +167,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
 
     socket =
       socket
+      |> assign(:verification, ZeroWeather.Verifier.snapshot())
       |> assign(:buienradar, fetch_buienradar(loc, socket.assigns.buienradar))
       |> pick_nowcast()
       |> start_own_nowcast(loc)
@@ -331,10 +333,24 @@ defmodule ZeroWeatherWeb.WeatherLive do
     assign(socket, :radar_nowcast, socket.assigns.own_nowcast || socket.assigns.buienradar)
   end
 
+  # one row per 5 minutes for the table of the maths
+  def lab_rows(series),
+    do:
+      series
+      |> Enum.with_index()
+      |> Enum.filter(fn {_, i} -> rem(i, 5) == 0 end)
+      |> Enum.map(&elem(&1, 0))
+
+  def pct(nil), do: "-"
+  def pct(v), do: "#{v}%"
+
   defp start_own_nowcast(socket, loc) do
     if connected?(socket) do
       start_async(socket, :own_nowcast, fn ->
-        {{loc.lat, loc.lon}, RadarNowcast.get(loc.lat, loc.lon), Gauges.latest(loc.lat, loc.lon)}
+        gauge = Gauges.latest(loc.lat, loc.lon)
+
+        {{loc.lat, loc.lon}, loc.lat |> RadarNowcast.get(loc.lon) |> GaugeAdjust.apply(gauge),
+         gauge}
       end)
     else
       socket
