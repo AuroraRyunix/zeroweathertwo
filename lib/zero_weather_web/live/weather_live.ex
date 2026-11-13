@@ -363,7 +363,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
     end
   end
 
-  @chart %{w: 720, h: 230, left: 44, right: 676, top: 16, bottom: 196}
+  @chart %{w: 720, h: 240, left: 44, right: 676, top: 30, bottom: 206}
 
   @doc """
   Geometry of the rain graph: one bar per minute (expected rain rate, mm/h) and, when the series carries it, a line

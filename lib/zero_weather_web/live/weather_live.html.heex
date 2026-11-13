@@ -33,13 +33,7 @@
           <span class="zw-muted">{@weather.current.condition_text}</span>
         </div>
 
-        <p id="hero-summary" class="mt-4 text-lg">
-          {if @radar_nowcast,
-            do: radar_hero_text(@radar_nowcast.summary),
-            else: @weather.summary}
-        </p>
-
-        <dl class="zw-dl mt-5">
+        <dl class="zw-dl mt-6">
           <dt>Wind</dt>
           <dd>{@weather.current.wind_speed} km/h from {@weather.current.wind_direction}°</dd>
           <dt>Humidity</dt>
@@ -115,9 +109,9 @@
             <%= for t <- chart.x_ticks do %>
               <text x={t.x} y={chart.bottom + 14} text-anchor="middle">{t.label}</text>
             <% end %>
-            <text x={chart.left - 6} y={chart.top - 2} text-anchor="end">mm/h</text>
+            <text x={chart.left} y={chart.top - 14} text-anchor="start">mm/h</text>
             <%= if chart.has_chance do %>
-              <text x={chart.right + 6} y={chart.top - 2}>chance</text>
+              <text x={chart.right} y={chart.top - 14} text-anchor="end">chance of rain</text>
             <% end %>
           </svg>
           <p class="mt-2 text-xs zw-muted">
