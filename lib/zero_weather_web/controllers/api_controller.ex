@@ -1,10 +1,14 @@
 defmodule ZeroWeatherWeb.ApiController do
   use ZeroWeatherWeb, :controller
 
-  alias ZeroWeather.{Weather, Radar, Locations}
+  alias ZeroWeather.{Weather, Radar, Locations, Nowcast}
 
   def health(conn, _params) do
-    json(conn, %{status: "ok", app: "zero_weather", timestamp: DateTime.utc_now() |> DateTime.to_iso8601()})
+    json(conn, %{
+      status: "ok",
+      app: "zero_weather",
+      timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
+    })
   end
 
   def locations(conn, _params) do
@@ -45,12 +49,20 @@ defmodule ZeroWeatherWeb.ApiController do
   defp serve_forecast(conn, lat, lon) do
     case Weather.get_nowcast(lat, lon) do
       {:ok, data} ->
-        json(conn, data)
+        json(conn, Map.put(data, :radar_nowcast, radar_nowcast(lat, lon)))
 
       {:error, reason} ->
         conn
         |> put_status(:bad_gateway)
         |> json(%{error: "Failed to retrieve nowcast", details: inspect(reason)})
+    end
+  end
+
+  # 5-minute Buienradar radar nowcast with a 1-minute countdown; an error here must not fail the whole response
+  defp radar_nowcast(lat, lon) do
+    case Nowcast.get(lat, lon) do
+      {:ok, nowcast} -> nowcast
+      {:error, reason} -> %{error: "Radar nowcast unavailable", details: inspect(reason)}
     end
   end
 

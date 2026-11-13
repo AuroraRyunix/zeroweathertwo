@@ -1,14 +1,17 @@
 defmodule ZeroWeatherWeb.WeatherLive do
   use ZeroWeatherWeb, :live_view
 
-  alias ZeroWeather.{Weather, Radar, Locations}
+  alias ZeroWeather.{Weather, Radar, Locations, Nowcast}
 
-  @refresh_interval 180_000 # 3 minutes
-  @animation_speed 750 # 750ms per radar frame
+  # 3 minutes
+  @refresh_interval 180_000
+  # 750ms per radar frame
+  @animation_speed 750
 
   @impl true
   def mount(_params, _session, socket) do
-    default_loc = Locations.default() # Ghent
+    # Ghent
+    default_loc = Locations.default()
     locations = Locations.list()
 
     radar_meta =
@@ -37,6 +40,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
 
     if connected?(socket) do
       schedule_refresh()
+      schedule_nowcast_tick()
     end
 
     socket =
@@ -45,6 +49,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
       |> assign(:locations, locations)
       |> assign(:active_location, default_loc)
       |> assign(:weather, weather)
+      |> assign(:radar_nowcast, fetch_radar_nowcast(default_loc, nil))
       |> assign(:radar_meta, radar_meta)
       |> assign(:frames, frames)
       |> assign(:active_frame_index, active_frame_idx)
@@ -148,6 +153,15 @@ defmodule ZeroWeatherWeb.WeatherLive do
     {:noreply, socket}
   end
 
+  @impl true
+  def handle_info(:nowcast_tick, socket) do
+    loc = socket.assigns.active_location
+    schedule_nowcast_tick()
+
+    {:noreply,
+     assign(socket, :radar_nowcast, fetch_radar_nowcast(loc, socket.assigns.radar_nowcast))}
+  end
+
   defp load_location(socket, loc) do
     case Weather.get_nowcast(loc.lat, loc.lon) do
       {:ok, weather} ->
@@ -155,6 +169,7 @@ defmodule ZeroWeatherWeb.WeatherLive do
           socket
           |> assign(:active_location, loc)
           |> assign(:weather, weather)
+          |> assign(:radar_nowcast, fetch_radar_nowcast(loc, nil))
           |> assign(:page_title, "#{loc.name} · Real-time Nowcast")
           |> assign(:error_message, nil)
           |> push_event("pan-location", %{lat: loc.lat, lon: loc.lon, name: loc.name})
@@ -170,11 +185,62 @@ defmodule ZeroWeatherWeb.WeatherLive do
     Process.send_after(self(), :refresh, @refresh_interval)
   end
 
+  # Tick just after every full minute so the countdown changes on the minute.
+  defp schedule_nowcast_tick do
+    Process.send_after(
+      self(),
+      :nowcast_tick,
+      60_000 - rem(System.system_time(:millisecond), 60_000) + 1_500
+    )
+  end
+
+  # Keeps the previous nowcast when the feed is briefly unavailable.
+  defp fetch_radar_nowcast(loc, fallback) do
+    case Nowcast.get(loc.lat, loc.lon) do
+      {:ok, nowcast} -> nowcast
+      _ -> fallback
+    end
+  end
+
+  @doc "One-line version of the countdown for the hero card."
+  def radar_hero_text(%{headline: headline, detail: nil}), do: headline
+  def radar_hero_text(%{headline: headline, detail: detail}), do: "#{headline} #{detail}"
+
+  @doc "Local (Belgian) clock time of an ISO8601 UTC timestamp."
+  def local_clock(iso) when is_binary(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, dt, _} -> Nowcast.local_time(dt)
+      _ -> "--:--"
+    end
+  end
+
+  # Square-root scale so light drizzle is still visible next to a downpour (5 mm/h = full height).
+  def strip_height(mm_h) when mm_h < 0.05, do: 3
+  def strip_height(mm_h), do: min(100, max(8, round(:math.sqrt(mm_h / 5.0) * 100)))
+
+  def strip_color(mm_h) when mm_h < 0.05, do: "bg-slate-800/60"
+  def strip_color(mm_h) when mm_h <= 1.0, do: "bg-sky-400"
+  def strip_color(mm_h) when mm_h <= 4.0, do: "bg-blue-500"
+  def strip_color(_mm_h), do: "bg-purple-600"
+
+  @doc "A handful of evenly spaced points of the series to label the time axis."
+  def strip_labels([]), do: []
+
+  def strip_labels(series) do
+    last = length(series) - 1
+
+    [0, 30, 60, 90, last]
+    |> Enum.filter(&(&1 <= last))
+    |> Enum.uniq()
+    |> Enum.map(&Enum.at(series, &1))
+  end
+
   def current_frame(frames, index) do
     Enum.at(frames, index)
   end
 
   def format_frame_time(nil), do: "--:--"
+
   def format_frame_time(frame) do
     dt = DateTime.from_unix!(frame.time)
     formatted = Calendar.strftime(dt, "%H:%M")

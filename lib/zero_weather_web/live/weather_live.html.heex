@@ -73,8 +73,8 @@
             </h1>
             <div class="mt-3 flex items-center space-x-2">
               <span class="text-2xl">{@weather.current.condition_icon}</span>
-              <p class="text-lg font-semibold text-sky-400">
-                {@weather.summary}
+              <p id="hero-summary" class="text-lg font-semibold text-sky-400">
+                {if @radar_nowcast, do: radar_hero_text(@radar_nowcast.summary), else: @weather.summary}
               </p>
             </div>
           </div>
@@ -109,6 +109,54 @@
           </div>
         </div>
       </div>
+
+      <!-- Rain countdown: Buienradar 5-minute radar nowcast, interpolated to 1 minute -->
+      <%= if @radar_nowcast do %>
+        <div id="radar-nowcast-card" class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl">
+          <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-4">
+            <div>
+              <h2 class="text-base font-bold text-white">⏱️ Rain countdown · next 2 hours</h2>
+              <p class="text-xs text-slate-400 mt-0.5">
+                {@radar_nowcast.source} 5-minute radar nowcast, interpolated to 1 minute
+              </p>
+            </div>
+            <div id="radar-nowcast-updated" class="text-[11px] text-slate-500 sm:text-right">
+              Radar data fetched {local_clock(@radar_nowcast.fetched_at)} · refreshes every minute
+            </div>
+          </div>
+
+          <p id="radar-nowcast-headline" class="text-2xl sm:text-3xl font-extrabold text-white">
+            {@radar_nowcast.summary.headline}
+          </p>
+          <%= if @radar_nowcast.summary.detail do %>
+            <p id="radar-nowcast-detail" class="mt-1 text-sky-400 font-semibold">
+              {@radar_nowcast.summary.detail}
+            </p>
+          <% end %>
+
+          <div
+            id="radar-nowcast-strip"
+            role="img"
+            aria-label="Expected rainfall per minute for the next two hours"
+            class="mt-5 h-24 flex items-end gap-px border-b border-slate-800"
+          >
+            <%= for point <- @radar_nowcast.series do %>
+              <div class="flex-1 h-full flex items-end" title={"#{point.time} · #{point.mm_h} mm/h"}>
+                <div
+                  class={["w-full rounded-t-sm", strip_color(point.mm_h)]}
+                  style={"height: #{strip_height(point.mm_h)}%"}
+                >
+                </div>
+              </div>
+            <% end %>
+          </div>
+          <div class="mt-2 flex justify-between text-[11px] text-slate-500 font-mono">
+            <%= for point <- strip_labels(@radar_nowcast.series) do %>
+              <span>{point.time}</span>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
 
       <!-- 15-Minute Rain Histogram Chart -->
       <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl">
@@ -298,6 +346,6 @@
 
   <footer class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 text-center text-xs text-slate-600">
     <p>ZeroWeather Belgium · Powered by Elixir & Phoenix LiveView · Built for VMware vSphere & Photon OS</p>
-    <p class="mt-1">Data sources: RainViewer Radar, RMI Open Data, Open-Meteo DWD ICON-D2 & Copernicus Air Quality</p>
+    <p class="mt-1">Data sources: Buienradar 5-minute nowcast, RainViewer Radar, RMI Open Data, Open-Meteo DWD ICON-D2 & Copernicus Air Quality</p>
   </footer>
 </div>
