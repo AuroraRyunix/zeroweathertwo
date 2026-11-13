@@ -30,16 +30,17 @@ RUN mkdir config
 COPY config/config.exs config/prod.exs config/
 RUN mix deps.compile
 
-# Copy assets and source files
+# Copy source files
 COPY priv priv
 COPY lib lib
-COPY assets assets
 
-# Compile assets
-RUN mix assets.deploy
-
-# Compile application
+# Compile application first: this generates the phoenix-colocated modules
+# (hooks + CSS) that the asset build below imports
 RUN mix compile
+
+# Copy assets and build them
+COPY assets assets
+RUN mix assets.deploy
 
 # Copy runtime config
 COPY config/runtime.exs config/
