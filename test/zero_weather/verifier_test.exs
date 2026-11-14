@@ -48,3 +48,37 @@ defmodule ZeroWeather.VerifierTest do
     assert Verifier.snapshot() == nil
   end
 end
+
+defmodule ZeroWeather.IncaTest do
+  use ExUnit.Case, async: true
+
+  alias ZeroWeather.Inca
+
+  # 4x4 raster of float32, 0.01 degree cells, top-left (3.0 E, 51.04 N): -1 everywhere except a wet 2x2 block
+  defp raster do
+    vals = for j <- 0..3, i <- 0..3, do: if(i in 1..2 and j in 1..2, do: 1.5, else: -1.0)
+    data = for v <- vals, into: <<>>, do: <<v::float-32-little>>
+
+    %{
+      width: 4,
+      height: 4,
+      data: data,
+      endian: :little,
+      lon0: 3.0,
+      lat0: 51.04,
+      dlon: 0.01,
+      dlat: 0.01
+    }
+  end
+
+  test "-1 counts as dry; share is taken over the 3x3 cells around the point" do
+    # cell (1,1): lon 3.015, lat 51.025
+    %{point: p, share: s} = Inca.at(raster(), 51.025, 3.015)
+    assert p == 1.5
+    # 3x3 around (1,1) covers i 0..2, j 0..2: wet cells (1,1) (2,1) (1,2) (2,2) = 4 of 9
+    assert_in_delta s, 4 / 9, 1.0e-9
+    %{point: p2, share: s2} = Inca.at(raster(), 51.035, 3.005)
+    assert p2 == 0.0
+    assert s2 > 0.0 and s2 < 0.5
+  end
+end

@@ -44,6 +44,7 @@ defmodule ZeroWeather.GaugesTest do
   test "nearest station is found within 60 km only" do
     assert {:ok, %{name: "Melle"}, d} = Gauges.nearest(51.0543, 3.7174)
     assert d < 15
-    assert Gauges.nearest(50.63, 5.58) == {:error, :no_station_nearby}
+    assert Gauges.nearest(52.5, 6.5) == {:error, :no_station_nearby}
+    assert [{%{name: "Melle"}, _}, _, _] = Gauges.nearby(51.0543, 3.7174)
   end
 end

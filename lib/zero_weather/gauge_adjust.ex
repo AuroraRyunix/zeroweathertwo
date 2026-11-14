@@ -22,6 +22,14 @@ defmodule ZeroWeather.GaugeAdjust do
   @min_mm 0.5
   @full_weight_mm 3.0
   @clamp {0.5, 2.0}
+  @light_mm_h 0.5
+  @virga_fade_min 60
+  @virga_start 0.5
+
+  @doc false
+  def virga_factor(lead_min) when is_number(lead_min),
+    do:
+      @virga_start + (1 - @virga_start) * min(max(lead_min, 0), @virga_fade_min) / @virga_fade_min
 
   @doc "Applies the gauge comparison to a nowcast result. Passes errors and missing gauges through untouched."
   def apply({:ok, nowcast}, {:ok, gauge}) do
@@ -60,55 +68,83 @@ defmodule ZeroWeather.GaugeAdjust do
       factor: 1.0,
       note: "the radar source is not RMI's, so there is no gauge comparison",
       min_mm: @min_mm,
-      full_weight_mm: @full_weight_mm
+      full_weight_mm: @full_weight_mm,
+      virga_risk: false,
+      stations: [],
+      window_min: @window_min,
+      paired: 0,
+      gauge_mm: 0.0,
+      radar_mm: 0.0
     }
 
     put_in(nowcast, [:diagnostics, :gauge], info)
   end
 
-  @doc "Comparison of the gauge's recent records with the cached radar frames at the station."
-  def compare(%{records: records, station_lat: lat, station_lon: lon} = gauge) do
-    cutoff = (records |> hd() |> Map.fetch!(:unix)) - @window_min * 60
+  @doc "Comparison of the recent records of the close gauges with the cached radar frames at each station."
+  def compare(%{records: _} = gauge) do
+    stations = Map.get(gauge, :stations) || [gauge]
+    newest = stations |> Enum.map(&(&1.records |> hd() |> Map.fetch!(:unix))) |> Enum.max()
+    cutoff = newest - @window_min * 60
 
-    rows =
-      for r <- records, r.unix > cutoff, r.mm != nil do
-        rates =
-          for t <- (r.unix - 600 + 300)..r.unix//300,
-              {:ok, frame} <- [Cache.get({:rmi_frame, t})],
-              do: RmiRadar.rate_at(frame, lat, lon)
+    per_station =
+      for st <- stations do
+        rows =
+          for r <- st.records, r.unix > cutoff, r.mm != nil do
+            rates =
+              for t <- (r.unix - 300)..r.unix//300,
+                  {:ok, frame} <- [Cache.get({:rmi_frame, t})],
+                  do: RmiRadar.rate_at(frame, st.station_lat, st.station_lon)
 
-        radar_mm = if rates == [], do: nil, else: Enum.sum(rates) / length(rates) / 6
+            radar_mm = if rates == [], do: nil, else: Enum.sum(rates) / length(rates) / 6
+
+            %{
+              time: r.time,
+              gauge_mm: r.mm,
+              radar_mm: radar_mm && Float.round(radar_mm, 3),
+              frames: length(rates)
+            }
+          end
+
+        paired = Enum.filter(rows, & &1.radar_mm)
 
         %{
-          time: r.time,
-          gauge_mm: r.mm,
-          radar_mm: radar_mm && Float.round(radar_mm, 3),
-          frames: length(rates)
+          station: st.station,
+          distance_km: Map.get(st, :distance_km),
+          intervals: rows,
+          paired: length(paired),
+          gauge_mm:
+            paired |> Enum.map(& &1.gauge_mm) |> Enum.sum() |> Kernel.*(1.0) |> Float.round(2),
+          radar_mm:
+            paired |> Enum.map(& &1.radar_mm) |> Enum.sum() |> Kernel.*(1.0) |> Float.round(2)
         }
       end
 
-    paired = Enum.filter(rows, & &1.radar_mm)
-    gauge_mm = paired |> Enum.map(& &1.gauge_mm) |> Enum.sum()
-    radar_mm = paired |> Enum.map(& &1.radar_mm) |> Enum.sum()
+    paired = per_station |> Enum.map(& &1.paired) |> Enum.sum()
+    gauge_mm = per_station |> Enum.map(& &1.gauge_mm) |> Enum.sum()
+    radar_mm = per_station |> Enum.map(& &1.radar_mm) |> Enum.sum()
 
     base = %{
       station: gauge.station,
+      stations: per_station,
       window_min: @window_min,
-      intervals: rows,
-      paired: length(paired),
+      intervals: hd(per_station).intervals,
+      paired: paired,
       gauge_mm: Float.round(gauge_mm * 1.0, 2),
       radar_mm: Float.round(radar_mm * 1.0, 2),
       min_mm: @min_mm,
       full_weight_mm: @full_weight_mm,
-      virga_risk: ZeroWeather.Gauges.virga_risk?(gauge)
+      virga_risk: ZeroWeather.Gauges.virga_risk?(gauge),
+      virga_light_mm_h: @light_mm_h,
+      virga_start: @virga_start,
+      virga_fade_min: @virga_fade_min
     }
 
     cond do
-      length(paired) < 2 ->
+      paired < 2 ->
         Map.merge(base, %{
           compared: false,
           factor: 1.0,
-          note: "too few cached radar frames to compare with the gauge"
+          note: "too few cached radar frames to compare with the gauges"
         })
 
       max(gauge_mm, radar_mm) < @min_mm ->

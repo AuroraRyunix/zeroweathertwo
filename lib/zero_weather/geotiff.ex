@@ -19,7 +19,10 @@ defmodule ZeroWeather.GeoTiff do
          {:ok, width, height} <- dims(tags),
          :ok <- check_format(tags),
          {:ok, geo} <- geotransform(tags, file, endian),
-         {:ok, data} <- raster(tags, file, endian, width, height) do
+         bps = div(tags |> Map.get(258, [32]) |> hd(), 8),
+         {:ok, data} <- raster(tags, file, endian, width, height, bps) do
+      data = to_float32(data, bps, endian)
+
       {:ok, Map.merge(%{width: width, height: height, data: data, endian: endian}, geo)}
     end
   end
@@ -101,12 +104,21 @@ defmodule ZeroWeather.GeoTiff do
     format = tags |> Map.get(339, [1]) |> hd()
 
     cond do
-      bits != 32 or format != 3 -> {:error, {:unsupported_sample_format, bits, format}}
+      bits not in [32, 64] or format != 3 -> {:error, {:unsupported_sample_format, bits, format}}
       compression != 1 -> {:error, {:unsupported_compression, compression}}
       samples != 1 -> {:error, {:unsupported_samples, samples}}
       true -> :ok
     end
   end
+
+  defp to_float32(data, 4, _endian), do: data
+
+  # 64-bit files (INCA): keep one internal representation, float32 in the file's byte order
+  defp to_float32(data, 8, :big),
+    do: for(<<v::float-64-big <- data>>, into: <<>>, do: <<v::float-32-big>>)
+
+  defp to_float32(data, 8, :little),
+    do: for(<<v::float-64-little <- data>>, into: <<>>, do: <<v::float-32-little>>)
 
   defp geotransform(%{34264 => [a, _b, _c, d, _e, f, _g, h | _]}, _file, _endian) do
     # ModelTransformation: x = a*i + d, y = f*j + h
@@ -119,16 +131,16 @@ defmodule ZeroWeather.GeoTiff do
 
   defp geotransform(_tags, _file, _endian), do: {:error, :no_georeference}
 
-  defp raster(%{324 => offsets, 325 => counts} = tags, file, _endian, w, h) do
+  defp raster(%{324 => offsets, 325 => counts} = tags, file, _endian, w, h, bps) do
     [tw] = tags[322]
     [th] = tags[323]
     across = div(w + tw - 1, tw)
     down = div(h + th - 1, th)
 
-    if length(offsets) != across * down or Enum.any?(counts, &(&1 != tw * th * 4)) do
+    if length(offsets) != across * down or Enum.any?(counts, &(&1 != tw * th * bps)) do
       {:error, :unexpected_tiles}
     else
-      tiles = offsets |> Enum.map(&binary_part(file, &1, tw * th * 4)) |> List.to_tuple()
+      tiles = offsets |> Enum.map(&binary_part(file, &1, tw * th * bps)) |> List.to_tuple()
 
       data =
         for y <- 0..(h - 1), into: <<>> do
@@ -137,26 +149,26 @@ defmodule ZeroWeather.GeoTiff do
 
           row =
             for tx <- 0..(across - 1), into: <<>> do
-              binary_part(elem(tiles, ty * across + tx), ly * tw * 4, tw * 4)
+              binary_part(elem(tiles, ty * across + tx), ly * tw * bps, tw * bps)
             end
 
-          binary_part(row, 0, w * 4)
+          binary_part(row, 0, w * bps)
         end
 
       {:ok, data}
     end
   end
 
-  defp raster(%{273 => offsets, 279 => counts}, file, _endian, w, h) do
+  defp raster(%{273 => offsets, 279 => counts}, file, _endian, w, h, bps) do
     data =
       Enum.zip(offsets, counts)
       |> Enum.map(fn {o, c} -> binary_part(file, o, c) end)
       |> IO.iodata_to_binary()
 
-    if byte_size(data) >= w * h * 4,
-      do: {:ok, binary_part(data, 0, w * h * 4)},
+    if byte_size(data) >= w * h * bps,
+      do: {:ok, binary_part(data, 0, w * h * bps)},
       else: {:error, :short_strips}
   end
 
-  defp raster(_tags, _file, _endian, _w, _h), do: {:error, :no_raster_data}
+  defp raster(_tags, _file, _endian, _w, _h, _bps), do: {:error, :no_raster_data}
 end

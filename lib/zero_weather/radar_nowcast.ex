@@ -47,6 +47,8 @@ defmodule ZeroWeather.RadarNowcast do
   @late_shrink 0.2
   # A minute counts as rain when it is at least this likely (percent); "possible" below that
   @likely 50
+  # exponent of the wet-area trend applied to the raw share (0 = off); see `area_trend/2`
+  @trend_k 0.0
   @possible 25
   @model_ttl 900
   # RMI composite: window half size in 1 km cells (~150 km), and how far from the raster edge a point must be
@@ -130,14 +132,15 @@ defmodule ZeroWeather.RadarNowcast do
   def model_from_rasters([newest_frame | _] = rasters, lat, lon) do
     if RmiRadar.covers?(newest_frame, lat, lon, @rmi_margin_deg) do
       grids = for f <- rasters, do: RmiRadar.window(f, lat, lon, @rmi_half, @rmi_cell_km)
+      motion = grids |> Enum.map(&RadarGrid.coarsen/1) |> estimate_motion_chain() |> fine_motion()
 
       {:ok,
        %{
          grid: hd(grids),
          field: field_stats(hd(grids)),
          frame_time: newest_frame.time,
-         motion:
-           grids |> Enum.map(&RadarGrid.coarsen/1) |> estimate_motion_chain() |> fine_motion(),
+         motion: motion,
+         trend: area_trend(grids, motion),
          lat: lat,
          lon: lon,
          radar_source: :rmi,
@@ -214,6 +217,52 @@ defmodule ZeroWeather.RadarNowcast do
            lon: lon
          }}
     end
+  end
+
+  @trend_box_km 30
+  @trend_eps 20
+
+  @doc """
+  Growth or decay of the rain around the point: the wet area in a #{@trend_box_km} km box now, divided by the wet area
+  of the same air one frame step earlier (the box moved back along the drift). `ratio` is damped by `#{@trend_eps}` cells
+  so a handful of cells cannot swing it. Above 1 the rain is spreading, below 1 it is dying out.
+  """
+  def area_trend([new, old | _], motion) do
+    half = round(@trend_box_km / new.cell_km)
+    cx = round(new.cx)
+    cy = round(new.cy)
+    ox = round(cx - motion.dx)
+    oy = round(cy - motion.dy)
+
+    a_new = wet_in_box(new, cx, cy, half)
+    a_old = wet_in_box(old, ox, oy, half)
+
+    %{
+      wet_new: a_new,
+      wet_old: a_old,
+      ratio: Float.round((a_new + @trend_eps) / (a_old + @trend_eps), 3),
+      box_km: @trend_box_km * 2
+    }
+  end
+
+  def area_trend(_, _), do: nil
+
+  defp wet_in_box(grid, cx, cy, half) do
+    for y <- (cy - half)..(cy + half),
+        x <- (cx - half)..(cx + half),
+        RadarGrid.cell(grid, x, y) >= @rain_threshold,
+        reduce: 0 do
+      acc -> acc + 1
+    end
+  end
+
+  # factor on the raw wet share at a lead (minutes since the frame): ratio ^ (k * min(lead, 60) / 10), kept in 0.5..2
+  @doc false
+  def trend_factor(nil, _k, _tau), do: 1.0
+  def trend_factor(_trend, k, _tau) when k in [0, 0.0], do: 1.0
+
+  def trend_factor(%{ratio: ratio}, k, tau) do
+    :math.pow(ratio, k * min(max(tau, 0), 60) / 10) |> max(0.5) |> min(2.0)
   end
 
   # motion was found in coarse (2x2) cells: express the shift in the full-resolution cells of the model grid
@@ -367,6 +416,7 @@ defmodule ZeroWeather.RadarNowcast do
     smooth_base = Keyword.get(opts, :smooth_base, @smooth_base_km / 1.5) * 1.5 / cell_km
     smooth_rate = Keyword.get(opts, :smooth_per_min, @smooth_per_min_km / 1.5) * 1.5 / cell_km
     decay_min = Keyword.get(opts, :decay_min)
+    trend_k = Keyword.get(opts, :trend_k, @trend_k)
 
     # drift in cells per minute
     vx = motion.dx / (@frame_seconds / 60)
@@ -395,6 +445,7 @@ defmodule ZeroWeather.RadarNowcast do
           sample_disk(grid, grid.cx - vx * tau, grid.cy - vy * tau, radius)
 
         decay = if decay_min, do: :math.exp(-tau / decay_min), else: 1.0
+        raw_chance = min(1.0, raw_chance * trend_factor(Map.get(model, :trend), trend_k, tau))
         at = DateTime.from_unix!(t)
 
         %{
@@ -512,6 +563,7 @@ defmodule ZeroWeather.RadarNowcast do
         coarse_cell_km: Float.round(cell_km * 2, 3)
       },
       field: Map.get(model, :field),
+      trend: Map.get(model, :trend),
       motion: %{
         dx_cells: Float.round(motion.dx * 1.0, 3),
         dy_cells: Float.round(motion.dy * 1.0, 3),

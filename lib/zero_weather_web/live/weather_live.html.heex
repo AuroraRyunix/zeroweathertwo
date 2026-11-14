@@ -259,6 +259,13 @@
                     else: "Newest pair used alone."}
                 </dd>
               <% end %>
+              <%= if d[:trend] do %>
+                <dt>Wet-area trend</dt>
+                <dd>
+                  × {d.trend.ratio} ({d.trend.wet_new} wet cells now in the {d.trend.box_km} km box, {d.trend.wet_old} a frame step earlier along the drift). Shown, not applied: on the replay, extrapolating it made
+                  every lead band's score worse.
+                </dd>
+              <% end %>
             </dl>
             <p class="zw-eq">
               score(dx,dy) = Σ f_new(x,y)·f_old(x−dx,y−dy) / √(Σ f_new² · Σ f_old²),  f = ln(1 + mm/h)
@@ -345,14 +352,21 @@
             <%= if d[:gauge] do %>
               <% g = d.gauge %>
               <dl class="zw-dl mt-2">
-                <dt>Station</dt>
-                <dd>{g.station}</dd>
-                <%= if g[:intervals] && g.intervals != [] do %>
-                  <dt>Last {g.window_min} min</dt>
-                  <dd>
-                    gauge {g.gauge_mm} mm, radar {g.radar_mm} mm over {g.paired} paired 10-minute intervals
-                  </dd>
-                <% end %>
+                <dt>Stations</dt>
+                <dd>
+                  <%= for st <- g[:stations] || [] do %>
+                    <span class="block">
+                      {st.station}
+                      <%= if st[:distance_km] do %>
+                        ({st.distance_km} km)
+                      <% end %>: gauge {st.gauge_mm} mm, radar {st.radar_mm} mm over {st.paired} intervals
+                    </span>
+                  <% end %>
+                </dd>
+                <dt>Total, last {g.window_min} min</dt>
+                <dd>
+                  gauge {g.gauge_mm} mm, radar {g.radar_mm} mm over {g.paired} paired 10-minute intervals
+                </dd>
                 <dt>Correction</dt>
                 <dd>
                   <%= cond do %>
@@ -426,6 +440,36 @@
                   </tbody>
                 </table>
               </div>
+              <%= if Enum.any?(v.bands, & &1[:inca]) do %>
+                <p class="text-sm mt-3">
+                  Against RMI's own INCA nowcast, on the same outcomes (INCA's chance = share of 3 × 3 cells that
+                  rain; "point" = its single-cell yes/no):
+                </p>
+                <div class="zw-scroll">
+                  <table class="zw-table" id="lab-inca">
+                    <thead>
+                      <tr>
+                        <th>Lead (min)</th>
+                        <th>n</th>
+                        <th>Ours</th>
+                        <th>INCA share</th>
+                        <th>INCA point</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <%= for b <- v.bands, b[:inca] do %>
+                        <tr>
+                          <td>{b.lead}</td>
+                          <td>{b.inca.n}</td>
+                          <td>{b.inca.brier_ours_same_rows}</td>
+                          <td>{b.inca.brier_inca_share}</td>
+                          <td>{b.inca.brier_inca_point}</td>
+                        </tr>
+                      <% end %>
+                    </tbody>
+                  </table>
+                </div>
+              <% end %>
             <% else %>
               <p class="text-sm zw-muted">
                 Live scores appear once forecasts made after this server started have been checked against the radar

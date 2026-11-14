@@ -17,7 +17,24 @@ defmodule ZeroWeather.Gauges do
   @max_distance_km 60
 
   # code, name, latitude, longitude (approximate; used only for the distance check)
-  @stations [%{code: 6434, name: "Melle", lat: 50.98, lon: 3.82}]
+  # RMI's open automatic weather stations (WFS aws:aws_station)
+  @stations [
+    %{code: 6414, name: "Beitem", lat: 50.904, lon: 3.122},
+    %{code: 6418, name: "Zeebrugge", lat: 51.348, lon: 3.202},
+    %{code: 6438, name: "Stabroek", lat: 51.325, lon: 4.364},
+    %{code: 6447, name: "Uccle", lat: 50.797, lon: 4.358},
+    %{code: 6439, name: "Sint-Katelijne-Waver", lat: 51.075, lon: 4.525},
+    %{code: 6434, name: "Melle", lat: 50.98, lon: 3.816},
+    %{code: 6459, name: "Ernage", lat: 50.582, lon: 4.689},
+    %{code: 6464, name: "Retie", lat: 51.221, lon: 5.027},
+    %{code: 6477, name: "Diepenbeek", lat: 50.916, lon: 5.45},
+    %{code: 10_101_002, name: "De Haan", lat: 51.28, lon: 3.074},
+    %{code: 6455, name: "Dourbes", lat: 50.096, lon: 4.595},
+    %{code: 6472, name: "Humain", lat: 50.194, lon: 5.255},
+    %{code: 6494, name: "Mont Rigi", lat: 50.511, lon: 6.073},
+    %{code: 6484, name: "Buzenol", lat: 49.62, lon: 5.587}
+  ]
+  @max_stations 3
 
   @doc "Latest 10-minute records (newest first) of the nearest station within #{@max_distance_km} km."
   def latest(lat, lon) do
@@ -31,8 +48,25 @@ defmodule ZeroWeather.Gauges do
     with {:ok, station, distance} <- nearest(lat, lon),
          :error <- Cache.get(:gauges_down) |> down_error(),
          {:ok, records} <- records(station) do
-      {:ok, summarize(station, distance, records)}
+      primary = summarize(station, distance, records)
+
+      # the other close stations are best effort: they only widen the radar-versus-gauge comparison
+      others =
+        for {st, d} <- nearby(lat, lon), st.code != station.code, {:ok, recs} <- [records(st)] do
+          summarize(st, d, recs)
+        end
+
+      {:ok, Map.put(primary, :stations, [primary | others])}
     end
+  end
+
+  @doc false
+  def nearby(lat, lon) do
+    @stations
+    |> Enum.map(&{&1, distance_km(lat, lon, &1.lat, &1.lon)})
+    |> Enum.filter(fn {_, d} -> d <= @max_distance_km end)
+    |> Enum.sort_by(&elem(&1, 1))
+    |> Enum.take(@max_stations)
   end
 
   defp down_error({:ok, reason}), do: {:error, {:rmi_backing_off, reason}}

@@ -75,4 +75,11 @@ defmodule ZeroWeather.RmiRadarTest do
       ZeroWeather.Cache.put(:rmi_down, nil, 0)
     end
   end
+
+  test "reads a 64-bit float GeoTIFF (INCA) as float32 cells, -1 where dry" do
+    {:ok, r} = ZeroWeather.GeoTiff.decode(File.read!("test/support/fixtures/inca_box.tif"))
+    assert r.width * r.height == 76 * 160
+    assert ZeroWeather.GeoTiff.cell(r, 0, 0) == -1.0
+    assert_in_delta r.dlon, 0.0119, 0.0001
+  end
 end

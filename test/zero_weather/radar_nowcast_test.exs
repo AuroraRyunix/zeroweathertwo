@@ -391,4 +391,35 @@ defmodule ZeroWeather.RadarNowcastTest do
       assert raw == 100 and chance in 90..100
     end
   end
+
+  describe "wet-area trend" do
+    defp blob_grid(n, cx, cy, r) do
+      rows =
+        for y <- 0..(n - 1) do
+          List.to_tuple(
+            for x <- 0..(n - 1),
+                do: if((x - cx) ** 2 + (y - cy) ** 2 <= r * r, do: 1.0, else: 0.0)
+          )
+        end
+
+      %{n: n, cx: n / 2, cy: n / 2, cell_km: 1.0, rows: List.to_tuple(rows)}
+    end
+
+    test "a growing blob has a ratio above 1, a dying one below 1, and a static field 1" do
+      small = blob_grid(101, 50, 50, 5)
+      big = blob_grid(101, 50, 50, 10)
+      still = %{dx: 0.0, dy: 0.0}
+      assert RadarNowcast.area_trend([big, small], still).ratio > 1.5
+      assert RadarNowcast.area_trend([small, big], still).ratio < 0.7
+      assert RadarNowcast.area_trend([big, big], still).ratio == 1.0
+    end
+
+    test "the trend factor is off at k = 0, bounded, and saturates after an hour" do
+      trend = %{ratio: 2.0}
+      assert RadarNowcast.trend_factor(trend, 0.0, 30) == 1.0
+      assert RadarNowcast.trend_factor(nil, 1.0, 30) == 1.0
+      assert RadarNowcast.trend_factor(trend, 1.0, 600) == 2.0
+      assert RadarNowcast.trend_factor(%{ratio: 0.1}, 1.0, 60) == 0.5
+    end
+  end
 end

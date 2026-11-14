@@ -24,6 +24,7 @@ defmodule ZeroWeather.Verifier do
   @bands [{10, 20}, {25, 40}, {45, 60}, {65, 90}, {95, 125}]
   @bins [{0, 4}, {5, 14}, {15, 29}, {30, 49}, {50, 69}, {70, 89}, {90, 100}]
   @max_catch_up 6
+  @inca_step 1800
 
   @points [
     {"Ghent", 51.0543, 3.7174},
@@ -129,6 +130,8 @@ defmodule ZeroWeather.Verifier do
       if length(older) < 2 do
         state
       else
+        inca_frames = inca_frames(t)
+
         entries =
           for {name, lat, lon} <- @points,
               {:ok, model} <- [RadarNowcast.model_from_rasters([frame | older], lat, lon)],
@@ -144,7 +147,8 @@ defmodule ZeroWeather.Verifier do
                    lead: 5 + i,
                    chance: p.chance,
                    raw: p.chance_raw,
-                   persist: RmiRadar.rate_at(frame, lat, lon) >= 0.1
+                   persist: RmiRadar.rate_at(frame, lat, lon) >= 0.1,
+                   inca: inca_at(inca_frames, t + (5 + i) * 60, lat, lon)
                  }}
 
         pending =
@@ -154,6 +158,31 @@ defmodule ZeroWeather.Verifier do
 
         %{state | pending: pending, origins: state.origins + 1}
       end
+    end
+  end
+
+  # INCA's forecast for the valid times of this origin's leads, only every 30 minutes (one small request per lead) and
+  # only for times still in the future, because for earlier ones it shows its analysis, not a forecast
+  defp inca_frames(t) do
+    if rem(t, @inca_step) == 0 do
+      now = System.os_time(:second)
+
+      for lead <- 20..120//10,
+          valid = t + lead * 60,
+          valid > now,
+          {:ok, f} <- [ZeroWeather.Inca.frame(valid)],
+          into: %{} do
+        {valid, f}
+      end
+    else
+      %{}
+    end
+  end
+
+  defp inca_at(frames, valid, lat, lon) do
+    case Map.get(frames, valid) do
+      nil -> nil
+      raster -> ZeroWeather.Inca.at(raster, lat, lon)
     end
   end
 
@@ -169,6 +198,7 @@ defmodule ZeroWeather.Verifier do
     pr = e.raw / 100
     pp = if e.persist, do: 1.0, else: 0.0
     bin = Enum.find_index(@bins, fn {lo, hi} -> e.chance >= lo and e.chance <= hi end)
+    stats = add_inca(stats, band, e, y)
 
     Map.update(
       stats,
@@ -191,6 +221,29 @@ defmodule ZeroWeather.Verifier do
     )
   end
 
+  # INCA rows: its 3x3 share and its point value as forecasts, with our own chance on the very same rows
+  defp add_inca(stats, band, %{inca: %{share: share, point: point}} = e, y) do
+    inc = fn m ->
+      %{
+        m
+        | n: m.n + 1,
+          bs_share: m.bs_share + (share - y) ** 2,
+          bs_point: m.bs_point + (if(point >= 0.1, do: 1.0, else: 0.0) - y) ** 2,
+          bs_ours: m.bs_ours + (e.chance / 100 - y) ** 2,
+          wet: m.wet + y
+      }
+    end
+
+    Map.update(
+      stats,
+      {:inca, band},
+      inc.(%{n: 0, wet: 0.0, bs_share: 0.0, bs_point: 0.0, bs_ours: 0.0}),
+      inc
+    )
+  end
+
+  defp add_inca(stats, _band, _e, _y), do: stats
+
   defp new_band(bin, e, y, pc, pr, pp) do
     %{
       n: 1,
@@ -202,11 +255,24 @@ defmodule ZeroWeather.Verifier do
     }
   end
 
+  defp inca_report(nil), do: nil
+
+  defp inca_report(m) do
+    %{
+      n: m.n,
+      wet: trunc(m.wet),
+      brier_inca_share: Float.round(m.bs_share / m.n, 4),
+      brier_inca_point: Float.round(m.bs_point / m.n, 4),
+      brier_ours_same_rows: Float.round(m.bs_ours / m.n, 4)
+    }
+  end
+
   @doc false
   def report(state) do
     bands =
       for {lo, hi} = b <- @bands do
         s = Map.get(state.stats, b)
+        inca = Map.get(state.stats, {:inca, b})
 
         if s do
           base = s.wet / s.n
@@ -219,6 +285,7 @@ defmodule ZeroWeather.Verifier do
             brier_raw: Float.round(s.bs_raw / s.n, 4),
             brier_persistence: Float.round(s.bs_persist / s.n, 4),
             brier_climatology: Float.round(base * (1 - base), 4),
+            inca: inca_report(inca),
             reliability:
               for {{blo, bhi}, i} <- Enum.with_index(@bins),
                   {n, w, c} <- [Map.get(s.bins, i, {0, 0.0, 0})] do

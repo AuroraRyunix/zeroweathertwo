@@ -194,3 +194,9 @@ MIT License. Open source for all Belgian weather enthusiasts.
 ## Maths panel, gauge check, live verification
 
 The page shows the forecast's maths (radar field, motion pairs, per-5-minute table, calibration tables). `GaugeAdjust` compares the Melle gauge with the radar and damps a rate correction only above 0.5 mm. `Verifier` scores our forecasts at six places against later RMI frames while the server runs (Brier vs persistence and climatology). A STEPS ensemble (pysteps) was benchmarked and not adopted yet: see `sidecar/README.md`.
+
+### Added later
+- **Stations:** all 14 open RMI automatic weather stations are known; up to three within 60 km are compared with the radar.
+- **Virga rule:** with a dew-point depression of 8 °C or more at the nearest station, light echoes (under 0.5 mm/h) are scaled by 0.5, fading to 1 at +60 min. Rates only, chance untouched. Not validated (no dry-air rain case in the replay), so it is shown in the panel as applied.
+- **Growth and decay:** the wet-area trend (area now over the area of the same air a frame step earlier) is computed and shown. Applied as an exponent on the raw chance it made every lead band worse in the replay (4,620 pairs, 325 wet), so it is off (`@trend_k 0.0`).
+- **INCA benchmark:** the live verifier now also asks RMI's INCA nowcast (WCS `inca__Precipitation`, cut to a Flanders box) every 30 minutes and scores it against ours on the same outcomes. Only the latest INCA run is served, so this has to be collected live.

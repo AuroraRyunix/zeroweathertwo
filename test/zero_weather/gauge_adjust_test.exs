@@ -50,4 +50,11 @@ defmodule ZeroWeather.GaugeAdjustTest do
     assert info.ratio > 1.5 and info.ratio <= 2.0
     assert info.factor > 1.0 and info.factor <= info.ratio
   end
+
+  test "virga factor starts at 0.5 and fades to 1 at +60 minutes" do
+    assert GaugeAdjust.virga_factor(0) == 0.5
+    assert GaugeAdjust.virga_factor(30) == 0.75
+    assert GaugeAdjust.virga_factor(60) == 1.0
+    assert GaugeAdjust.virga_factor(120) == 1.0
+  end
 end
